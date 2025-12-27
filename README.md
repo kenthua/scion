@@ -15,7 +15,7 @@ Ensure that your `$GOPATH/bin` is in your system `$PATH`.
 ## Concepts
 
 - **Agent**: An isolated container running an LLM-driven task. Each agent has its own home directory, workspace, and credentials.
-- **Grove**: A "grove" is a project workspace where agents live. It corresponds to a `.scion` directory which contains agent configurations and templates. When initialized, it includes default templates for supported providers (`gemini-default`, `claude-default`).
+- **Grove**: A "grove" is a project workspace where agents live. It corresponds to a `.scion` directory which contains agent configurations and templates. When initialized, it includes default templates for supported providers (`gemini`, `claude`).
 - **Template**: A blueprint for an agent, defining its base configuration, system prompt, and tools.
 
 ## Quick Start
@@ -35,14 +35,14 @@ You can launch an agent immediately using `start` (or its alias `run`), or provi
 
 #### Option A: Quick Start (Immediate Execution)
 
-Launch a new agent to perform a specific task. By default, this runs in the background using the `gemini-default` template.
+Launch a new agent to perform a specific task. By default, this runs in the background using the `gemini` template.
 
 ```bash
-# Start a gemini agent named "coder" (uses gemini-default by default)
+# Start a gemini agent named "coder" (uses gemini by default)
 scion start coder "Refactor the authentication middleware in pkg/auth"
 
 # Start a Claude-based agent
-scion run auditor "Audit the user input validation" --type claude-default
+scion run auditor "Audit the user input validation" --type claude
 
 # Start and immediately attach to the session
 scion start debug "Help me debug this error" --attach
@@ -136,7 +136,7 @@ Templates serve as blueprints for new agents. You can manage them using the `tem
   ```bash
   scion templates update-default
   ```
-  *(Note: This restores or syncs the default `gemini-default` and `claude-default` templates with the latest defaults from the Scion binary.)*
+  *(Note: This restores or syncs the default `gemini` and `claude` templates with the latest defaults from the Scion binary.)*
 
 Use the `--global` flag with these commands to target the global template store in `~/.scion/templates`.
 

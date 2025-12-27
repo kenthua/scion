@@ -13,10 +13,10 @@ var embedsFS embed.FS
 
 func SeedTemplateDir(templateDir string, templateName string, harnessProvider string, force bool) error {
 	configDirName := ".gemini"
-	embedDir := "gemini-cli"
-	if harnessProvider == "claude-code" {
+	embedDir := "gemini"
+	if harnessProvider == "claude" {
 		configDirName = ".claude"
-		embedDir = "claude-code"
+		embedDir = "claude"
 	}
 
 	// Create directories
@@ -36,8 +36,8 @@ func SeedTemplateDir(templateDir string, templateName string, harnessProvider st
 	readEmbed := func(name string) string {
 		data, err := embedsFS.ReadFile(filepath.Join("embeds", embedDir, name))
 		if err != nil {
-			// Fallback to gemini-cli if not found in provider dir
-			data, err = embedsFS.ReadFile(filepath.Join("embeds", "gemini-cli", name))
+			// Fallback to gemini if not found in provider dir
+			data, err = embedsFS.ReadFile(filepath.Join("embeds", "gemini", name))
 			if err != nil {
 				return ""
 			}
@@ -56,7 +56,7 @@ func SeedTemplateDir(templateDir string, templateName string, harnessProvider st
 	}
 
 	mdFile := "gemini.md"
-	if harnessProvider == "claude-code" {
+	if harnessProvider == "claude" {
 		mdFile = "claude.md"
 	}
 
@@ -112,11 +112,11 @@ func InitProject(targetDir string) error {
 		return fmt.Errorf("failed to create agents directory: %w", err)
 	}
 
-	if err := SeedTemplateDir(filepath.Join(templatesDir, "gemini-default"), "gemini-default", "gemini-cli", false); err != nil {
-		return fmt.Errorf("failed to seed gemini-default template: %w", err)
+	if err := SeedTemplateDir(filepath.Join(templatesDir, "gemini"), "gemini", "gemini", false); err != nil {
+		return fmt.Errorf("failed to seed gemini template: %w", err)
 	}
 
-	return SeedTemplateDir(filepath.Join(templatesDir, "claude-default"), "claude-default", "claude-code", false)
+	return SeedTemplateDir(filepath.Join(templatesDir, "claude"), "claude", "claude", false)
 }
 
 func InitGlobal() error {
@@ -132,9 +132,9 @@ func InitGlobal() error {
 		return fmt.Errorf("failed to create global agents directory: %w", err)
 	}
 
-	if err := SeedTemplateDir(filepath.Join(templatesDir, "gemini-default"), "gemini-default", "gemini-cli", false); err != nil {
-		return fmt.Errorf("failed to seed global gemini-default template: %w", err)
+	if err := SeedTemplateDir(filepath.Join(templatesDir, "gemini"), "gemini", "gemini", false); err != nil {
+		return fmt.Errorf("failed to seed global gemini template: %w", err)
 	}
 
-	return SeedTemplateDir(filepath.Join(templatesDir, "claude-default"), "claude-default", "claude-code", false)
+	return SeedTemplateDir(filepath.Join(templatesDir, "claude"), "claude", "claude", false)
 }

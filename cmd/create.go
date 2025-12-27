@@ -42,7 +42,7 @@ The agent will be created from a template.`,
 
 func init() {
 	rootCmd.AddCommand(createCmd)
-	createCmd.Flags().StringVarP(&templateName, "type", "t", "gemini-default", "Template to use")
+	createCmd.Flags().StringVarP(&templateName, "type", "t", "gemini", "Template to use")
 	createCmd.Flags().StringVarP(&agentImage, "image", "i", "", "Container image to use (overrides template)")
 }
 

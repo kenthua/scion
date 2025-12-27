@@ -118,5 +118,5 @@ func init() {
 	templatesCmd.AddCommand(templatesDeleteCmd)
 	templatesCmd.AddCommand(templatesUpdateDefaultCmd)
 
-	templatesCreateCmd.Flags().StringP("provider", "p", "", "Harness provider (e.g. gemini-cli, claude-code)")
+	templatesCreateCmd.Flags().StringP("provider", "p", "", "Harness provider (e.g. gemini, claude)")
 }

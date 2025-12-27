@@ -6,16 +6,16 @@ The `scion.json` file is used within templates and agent directories to configur
 
 ### `template` (string)
 The name of the template this configuration belongs to.
-- **Example**: `"template": "gemini-default"`
+- **Example**: `"template": "gemini"`
 
 ### `harness_provider` (string)
 The agent harness to use. This determines how environment variables are propagated and how the agent is executed.
-- **Supported values**: `gemini-cli`, `claude-code`, `generic`
-- **Example**: `"harness_provider": "claude-code"`
+- **Supported values**: `gemini`, `claude`, `generic`
+- **Example**: `"harness_provider": "claude"`
 
 ### `config_dir` (string)
 The directory inside the agent's home where the harness stores its configuration.
-- **Default**: `.gemini` for `gemini-cli`, `.claude` for `claude-code`, `.scion` for `generic`.
+- **Default**: `.gemini` for `gemini`, `.claude` for `claude`, `.scion` for `generic`.
 - **Example**: `"config_dir": ".claude"`
 
 ### `unix_username` (string)
@@ -59,4 +59,4 @@ The model ID to use for the agent.
 - **Fields**: `grove`, `name`, `status`.
 
 ## Inheritance
-`scion` uses a template inheritance system. Configuration fields are merged from the specified template type and finally any overrides in the agent's own directory. The last value defined for a field takes precedence. Unlike earlier versions, there is no longer a single global `default` template that all templates inherit from; instead, agents start from a specific provider default like `gemini-default` or `claude-default`.
+`scion` uses a template inheritance system. Configuration fields are merged from the specified template type and finally any overrides in the agent's own directory. The last value defined for a field takes precedence. Unlike earlier versions, there is no longer a single global `default` template that all templates inherit from; instead, agents start from a specific provider default like `gemini` or `claude`.

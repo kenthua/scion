@@ -17,11 +17,9 @@ type Harness interface {
 
 func New(provider string) Harness {
 	switch provider {
-	case "claude-code":
+	case "claude":
 		return &ClaudeCode{}
-	case "generic":
-		return &Generic{}
-	default:
+	case "gemini":
 		return &GeminiCLI{}
 	}
 }

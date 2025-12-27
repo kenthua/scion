@@ -438,7 +438,7 @@ func GetAgent(agentName string, templateName string, agentImage string, grovePat
 	// The agent's scion.json acts as the final override
 
 	// Determine the template name from the agent's config or default
-	effectiveTemplate := "gemini-default"
+	effectiveTemplate := "gemini"
 	if agentCfg.Template != "" {
 		effectiveTemplate = agentCfg.Template
 	}

@@ -9,7 +9,7 @@ import (
 type ClaudeCode struct{}
 
 func (c *ClaudeCode) Name() string {
-	return "claude-code"
+	return "claude"
 }
 
 func (c *ClaudeCode) DiscoverAuth(agentHome string) api.AuthConfig {

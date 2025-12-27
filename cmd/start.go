@@ -23,7 +23,7 @@ look for a prompt.md file in its root directory.`,
 
 func init() {
 	rootCmd.AddCommand(startCmd)
-	startCmd.Flags().StringVarP(&templateName, "type", "t", "gemini-default", "Template to use")
+	startCmd.Flags().StringVarP(&templateName, "type", "t", "gemini", "Template to use")
 	startCmd.Flags().StringVarP(&agentImage, "image", "i", "", "Container image to use (overrides template)")
 	startCmd.Flags().BoolVar(&noAuth, "no-auth", false, "Disable authentication propagation")
 	startCmd.Flags().BoolVarP(&attach, "attach", "a", false, "Attach to the agent TTY after starting")

@@ -13,7 +13,7 @@ import (
 type GeminiCLI struct{}
 
 func (g *GeminiCLI) Name() string {
-	return "gemini-cli"
+	return "gemini"
 }
 
 func (g *GeminiCLI) DiscoverAuth(agentHome string) api.AuthConfig {

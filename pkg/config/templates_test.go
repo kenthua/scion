@@ -36,7 +36,7 @@ func TestCreateTemplate(t *testing.T) {
 
 	// Test creating a project template
 	tplName := "test-tpl"
-	err = CreateTemplate(tplName, "gemini-cli", false)
+	err = CreateTemplate(tplName, "gemini", false)
 	if err != nil {
 		t.Fatalf("failed to create project template: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestCreateTemplate(t *testing.T) {
 
 	// Test creating a global template
 	globalTplName := "global-tpl"
-	err = CreateTemplate(globalTplName, "gemini-cli", true)
+	err = CreateTemplate(globalTplName, "gemini", true)
 	if err != nil {
 		t.Fatalf("failed to create global template: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestCreateTemplate(t *testing.T) {
 	}
 
 	// Test duplicate template creation fails
-	err = CreateTemplate(tplName, "gemini-cli", false)
+	err = CreateTemplate(tplName, "gemini", false)
 	if err == nil {
 		t.Error("expected error when creating duplicate template, got nil")
 	}
@@ -105,11 +105,11 @@ func TestDeleteTemplate(t *testing.T) {
 
 	// Create templates to delete
 	tplName := "test-tpl-delete"
-	if err := CreateTemplate(tplName, "gemini-cli", false); err != nil {
+	if err := CreateTemplate(tplName, "gemini", false); err != nil {
 		t.Fatal(err)
 	}
 	globalTplName := "global-tpl-delete"
-	if err := CreateTemplate(globalTplName, "gemini-cli", true); err != nil {
+	if err := CreateTemplate(globalTplName, "gemini", true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -131,9 +131,9 @@ func TestDeleteTemplate(t *testing.T) {
 		t.Errorf("expected global template directory %s to be gone", globalExpectedPath)
 	}
 
-	// Test deleting "gemini-default" fails
-	if err := DeleteTemplate("gemini-default", false); err == nil {
-		t.Error("expected error when deleting gemini-default template, got nil")
+	// Test deleting "gemini" fails
+	if err := DeleteTemplate("gemini", false); err == nil {
+		t.Error("expected error when deleting gemini template, got nil")
 	}
 
 	// Test deleting non-existent template fails
@@ -173,7 +173,7 @@ func TestUpdateDefaultTemplates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	geminiDefaultScionJSON := filepath.Join(projectDir, "templates", "gemini-default", "scion.json")
+	geminiDefaultScionJSON := filepath.Join(projectDir, "templates", "gemini", "scion.json")
 	
 	// Corrupt the default template file
 	corruptContent := "CORRUPT"
