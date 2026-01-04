@@ -1,3 +1,5 @@
+TODO this file is pretty out of date
+
 # scion-agent.json Configuration Reference
 
 The `scion-agent.json` file is used within templates and agent directories to configure how a Scion agent is provisioned and executed.

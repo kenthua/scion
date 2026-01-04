@@ -30,6 +30,8 @@ go install github.com/ptone/scion-agent@latest
 
 Ensure that your `$GOPATH/bin` is in your system `$PATH`.
 
+You must have either the `docker` or `container`
+
 ## Quick Start
 
 ### 1. Initialize a Grove
@@ -38,8 +40,10 @@ Navigate to your project root and initialize a new Scion grove. This creates the
 
 ```bash
 cd my-project
-scion grove init
+scion init
 ```
+
+Note: currently the initialized settings will default to use the Apple container tool, to update this to docker, change the `profiles.local.runtime` setting in `.scion/settings.json`
 
 ### 2. Start Agents
 

@@ -1,15 +1,20 @@
 # Scion Templates Guide
 
-Templates are the blueprint for your agents. They define the environment, configuration, and tools that an agent will have when it starts. This guide explains how to manage and use templates effectively.
+Templates are the blueprint for your agents. They define the configuration, tools, and environment that an agent will have when it starts. This guide explains how to manage and use templates effectively.
 
 ## What is a Template?
 
-A template in Scion is a directory containing configuration files that are copied to an agent's home directory upon creation. It typically includes:
+A template in Scion is a directory containing configuration files that are copied to an agent's home directory upon creation. It includes:
 
-- `scion-agent.json`: The core configuration file.
-- `system_prompt.md`: Instructions for the LLM.
-- `settings.json`: Harness-specific settings (e.g., tools, allowlists).
+- `scion-agent.json`: The core configuration file
+- `home/`: the home folder (~) for the agent user inside the container.
+
+The home folder can contain any number of unix user setups most notably:
+
+- `settings.json`: Harness-specific settings (e.g., tools, allowlists). This allows a Scion agent to be configured to the full extent that harness allows (see for example, [gemini](http://geminicli.com) [claude](http://claude))
+- `system_prompt.md`: Instructions for the LLM. A system prompt can give the agent a stronger core sense of purpose than is possible with user-level instruction files (gemini.md, agents.md, claude.md etc)
 - `.bashrc`: Shell customization for the agent.
+
 
 ## Managing Templates
 
