@@ -41,7 +41,7 @@ cd my-project
 scion init
 ```
 
-Note: currently the initialized settings will default to use the Apple container tool, to update this to docker, change the `profiles.local.runtime` setting in `.scion/settings.json`
+Note: Scion automatically detects your operating system and configures the default runtime (Docker for Linux/Windows, Container for macOS). You can change this in `.scion/settings.json`.
 
 ### 2. Start Agents
 

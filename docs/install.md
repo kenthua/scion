@@ -70,7 +70,11 @@ This creates a `.scion` directory in your project root containing:
 - `templates/`: Default agent templates (gemini, claude, etc.).
 
 ### 2. Select Runtime
-By default, Scion may be configured to use the `container` runtime on macOS. If you want to use Docker, edit `.scion/settings.json`:
+Scion automatically selects the appropriate runtime based on your operating system:
+- **macOS**: Defaults to `container` (Apple Virtualization Framework).
+- **Linux/Windows**: Defaults to `docker`.
+
+If you wish to change this (e.g., to use Docker on macOS), you can manually edit `.scion/settings.json`:
 
 ```json
 {
