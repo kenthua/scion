@@ -245,7 +245,8 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 }
 
 func buildAgentEnv(scionCfg *api.ScionConfig, extraEnv map[string]string) []string {
-	agentEnv := []string{}
+	combined := make(map[string]string)
+
 	if scionCfg != nil && scionCfg.Env != nil {
 		for k, v := range scionCfg.Env {
 			// Support variable substitution in keys and values
@@ -255,12 +256,20 @@ func buildAgentEnv(scionCfg *api.ScionConfig, extraEnv map[string]string) []stri
 			if expandedKey == "" {
 				continue
 			}
-
-			agentEnv = append(agentEnv, fmt.Sprintf("%s=%s", expandedKey, expandedValue))
+			combined[expandedKey] = expandedValue
 		}
 	}
 	// Add extraEnv
 	for k, v := range extraEnv {
+		combined[k] = v
+	}
+
+	agentEnv := []string{}
+	for k, v := range combined {
+		if v == "" {
+			fmt.Fprintf(os.Stderr, "Warning: Environment variable '%s' has no value and will be omitted.\n", k)
+			continue
+		}
 		agentEnv = append(agentEnv, fmt.Sprintf("%s=%s", k, v))
 	}
 	return agentEnv
