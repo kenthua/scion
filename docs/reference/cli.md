@@ -62,7 +62,11 @@ Lists all agents and their status.
 
 Deletes an agent, removing its container, home directory, and worktree.
 
-**Usage:** `scion delete <agent-name>`
+**Usage:** `scion delete <agent-name> [flags]`
+
+- **Flags:**
+    - `-b, --preserve-branch`: Preserve the git branch associated with the worktree (default: deleted).
+    - `--stopped`: Delete all agents with stopped containers.
 
 ## `scion grove`
 

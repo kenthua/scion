@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/ptone/scion-agent/pkg/agent"
+	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/runtime"
+	"github.com/ptone/scion-agent/pkg/util"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +34,10 @@ var deleteCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		projectDir, _ := config.GetResolvedProjectDir(grovePath)
+		if preserveBranch && !util.IsGitRepoDir(projectDir) {
+			fmt.Println("Warning: --preserve-branch used outside a git repository; this flag has no effect.")
+		}
 		if deleteStopped {
 			rt := runtime.GetRuntime(grovePath, profile)
 			mgr := agent.NewManager(rt)
@@ -62,7 +68,7 @@ var deleteCmd = &cobra.Command{
 					targetGrovePath = grovePath
 				}
 
-				branchDeleted, err := mgr.Delete(context.Background(), a.Name, true, targetGrovePath, removeBranch)
+				branchDeleted, err := mgr.Delete(context.Background(), a.Name, true, targetGrovePath, !preserveBranch)
 				if err != nil {
 					fmt.Printf("Failed to delete agent '%s': %v\n", a.Name, err)
 					continue
@@ -110,7 +116,7 @@ var deleteCmd = &cobra.Command{
 			fmt.Println("No container found, removing agent definition...")
 		}
 
-		branchDeleted, err := mgr.Delete(context.Background(), agentName, true, grovePath, removeBranch)
+		branchDeleted, err := mgr.Delete(context.Background(), agentName, true, grovePath, !preserveBranch)
 		if err != nil {
 			return err
 		}
@@ -124,10 +130,10 @@ var deleteCmd = &cobra.Command{
 	},
 }
 
-var removeBranch bool
+var preserveBranch bool
 
 func init() {
 	rootCmd.AddCommand(deleteCmd)
-	deleteCmd.Flags().BoolVarP(&removeBranch, "remove-branch", "b", false, "Remove the git branch associated with the worktree")
+	deleteCmd.Flags().BoolVarP(&preserveBranch, "preserve-branch", "b", false, "Preserve the git branch associated with the worktree")
 	deleteCmd.Flags().BoolVar(&deleteStopped, "stopped", false, "Delete all agents with stopped containers")
 }

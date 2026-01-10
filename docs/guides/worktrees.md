@@ -110,7 +110,7 @@ scion delete <agent-name>
 ```
 - The worktree directory is removed.
 - `git worktree prune` is called to clean up git metadata.
-- **Optional**: You can pass the `-b` or `--remove-branch` flag to also delete the associated git branch.
+- **Optional**: The associated git branch is deleted by default. You can pass the `-b` or `--preserve-branch` flag to keep it.
 
 ## Manual Management
 
