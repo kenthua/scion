@@ -16,6 +16,9 @@ func TestBuildCommonRunArgs(t *testing.T) {
 	tmpHome := t.TempDir()
 	tmpWorkspace := t.TempDir()
 
+	// Set up test environment variable for volume expansion test
+	t.Setenv("TEST_SCION_VOL_PATH", "/test/go")
+
 	// Setup some dummy auth files
 	tmpDir := t.TempDir()
 	oauthFile := filepath.Join(tmpDir, "oauth.json")
@@ -243,6 +246,20 @@ func TestBuildCommonRunArgs(t *testing.T) {
 					h, _ := os.UserHomeDir()
 					return h
 				}()),
+			},
+		},
+		{
+			name: "volume env var expansion",
+			config: RunConfig{
+				Harness:      &harness.GeminiCLI{},
+				UnixUsername: "scion",
+				Volumes: []api.VolumeMount{
+					{Source: "${TEST_SCION_VOL_PATH}/pkg", Target: "/container/go/pkg", ReadOnly: false},
+				},
+				Image: "scion-agent:latest",
+			},
+			wantIn: []string{
+				"-v /test/go/pkg:/container/go/pkg",
 			},
 		},
 		{

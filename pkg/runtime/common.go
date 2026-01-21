@@ -30,19 +30,23 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 
 	hostHome, _ := os.UserHomeDir()
 	expandPath := func(path string, isTarget bool) string {
-		if strings.HasPrefix(path, "~/") {
+		// Expand environment variables first (e.g., ${GOPATH}, $HOME)
+		expanded, _ := util.ExpandEnv(path)
+
+		// Then handle tilde expansion
+		if strings.HasPrefix(expanded, "~/") {
 			if isTarget {
-				return filepath.Join(util.GetHomeDir(config.UnixUsername), path[2:])
+				return filepath.Join(util.GetHomeDir(config.UnixUsername), expanded[2:])
 			}
-			return filepath.Join(hostHome, path[2:])
+			return filepath.Join(hostHome, expanded[2:])
 		}
-		if path == "~" {
+		if expanded == "~" {
 			if isTarget {
 				return util.GetHomeDir(config.UnixUsername)
 			}
 			return hostHome
 		}
-		return path
+		return expanded
 	}
 
 	// Volume deduplication
