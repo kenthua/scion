@@ -299,6 +299,78 @@ func TestGroveList(t *testing.T) {
 // RuntimeHost Tests
 // ============================================================================
 
+func TestGroveLookupCaseInsensitive(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	// Create a grove with mixed case name
+	grove := &store.Grove{
+		ID:         api.NewUUID(),
+		Name:       "Global",
+		Slug:       "global",
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove))
+
+	// Look up with exact case - should work
+	retrieved, err := s.GetGroveBySlugCaseInsensitive(ctx, "global")
+	require.NoError(t, err)
+	assert.Equal(t, grove.ID, retrieved.ID)
+
+	// Look up with different case - should still work
+	retrieved, err = s.GetGroveBySlugCaseInsensitive(ctx, "GLOBAL")
+	require.NoError(t, err)
+	assert.Equal(t, grove.ID, retrieved.ID)
+
+	// Look up with mixed case - should still work
+	retrieved, err = s.GetGroveBySlugCaseInsensitive(ctx, "Global")
+	require.NoError(t, err)
+	assert.Equal(t, grove.ID, retrieved.ID)
+
+	// Look up non-existent - should return ErrNotFound
+	_, err = s.GetGroveBySlugCaseInsensitive(ctx, "nonexistent")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestRuntimeHostLookupByName(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	// Create a host
+	host := &store.RuntimeHost{
+		ID:     api.NewUUID(),
+		Name:   "My-Laptop",
+		Slug:   "my-laptop",
+		Type:   "docker",
+		Mode:   store.HostModeConnected,
+		Status: store.HostStatusOnline,
+	}
+	require.NoError(t, s.CreateRuntimeHost(ctx, host))
+
+	// Look up with exact case - should work
+	retrieved, err := s.GetRuntimeHostByName(ctx, "My-Laptop")
+	require.NoError(t, err)
+	assert.Equal(t, host.ID, retrieved.ID)
+
+	// Look up with different case - should still work (case-insensitive)
+	retrieved, err = s.GetRuntimeHostByName(ctx, "my-laptop")
+	require.NoError(t, err)
+	assert.Equal(t, host.ID, retrieved.ID)
+
+	// Look up with all caps - should still work
+	retrieved, err = s.GetRuntimeHostByName(ctx, "MY-LAPTOP")
+	require.NoError(t, err)
+	assert.Equal(t, host.ID, retrieved.ID)
+
+	// Look up non-existent - should return ErrNotFound
+	_, err = s.GetRuntimeHostByName(ctx, "nonexistent")
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+// ============================================================================
+// RuntimeHost Tests
+// ============================================================================
+
 func TestRuntimeHostCRUD(t *testing.T) {
 	s := setupTestStore(t)
 	ctx := context.Background()

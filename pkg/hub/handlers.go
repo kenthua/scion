@@ -577,12 +577,23 @@ func (s *Server) handleGroveRegister(w http.ResponseWriter, r *http.Request) {
 
 	normalizedRemote := normalizeGitRemote(req.GitRemote)
 
-	// Try to find existing grove by git remote
+	// Try to find existing grove
 	var grove *store.Grove
 	var created bool
 
 	if normalizedRemote != "" {
+		// For groves with git remote, look up by git remote (exact match)
 		existingGrove, err := s.store.GetGroveByGitRemote(ctx, normalizedRemote)
+		if err == nil {
+			grove = existingGrove
+		} else if err != store.ErrNotFound {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+	} else {
+		// For groves without git remote (like global groves), look up by slug (case-insensitive)
+		slug := api.Slugify(req.Name)
+		existingGrove, err := s.store.GetGroveBySlugCaseInsensitive(ctx, slug)
 		if err == nil {
 			grove = existingGrove
 		} else if err != store.ErrNotFound {
@@ -615,52 +626,84 @@ func (s *Server) handleGroveRegister(w http.ResponseWriter, r *http.Request) {
 
 	if req.Host != nil {
 		hostID := req.Host.ID
-		if hostID == "" {
-			hostID = api.NewUUID()
+
+		// Try to find existing host by ID first, then by name
+		var existingHost *store.RuntimeHost
+		var err error
+
+		if hostID != "" {
+			existingHost, err = s.store.GetRuntimeHost(ctx, hostID)
+			if err != nil && err != store.ErrNotFound {
+				writeErrorFromErr(w, err, "")
+				return
+			}
 		}
 
-		// Create or update host
-		host = &store.RuntimeHost{
-			ID:                 hostID,
-			Name:               req.Host.Name,
-			Slug:               api.Slugify(req.Host.Name),
-			Type:               "docker", // Default
-			Mode:               req.Mode,
-			Version:            req.Host.Version,
-			Status:             store.HostStatusOnline,
-			ConnectionState:    "connected",
-			Capabilities:       req.Host.Capabilities,
-			SupportedHarnesses: req.Host.SupportedHarnesses,
-			Runtimes:           req.Host.Runtimes,
+		// If not found by ID, try to find by name (prevents duplicate hosts with same hostname)
+		if existingHost == nil && req.Host.Name != "" {
+			existingHost, err = s.store.GetRuntimeHostByName(ctx, req.Host.Name)
+			if err != nil && err != store.ErrNotFound {
+				writeErrorFromErr(w, err, "")
+				return
+			}
 		}
 
-		if host.Mode == "" {
-			host.Mode = store.HostModeConnected
-		}
-
-		// Determine runtime type from runtimes list
-		if len(req.Host.Runtimes) > 0 {
-			host.Type = req.Host.Runtimes[0].Type
-		}
-
-		// Try to get existing host
-		existingHost, err := s.store.GetRuntimeHost(ctx, hostID)
-		if err == nil {
+		if existingHost != nil {
 			// Update existing host
-			host.Created = existingHost.Created
+			host = existingHost
+			host.Name = req.Host.Name
+			host.Slug = api.Slugify(req.Host.Name)
+			host.Version = req.Host.Version
+			host.Status = store.HostStatusOnline
+			host.ConnectionState = "connected"
+			host.Capabilities = req.Host.Capabilities
+			host.SupportedHarnesses = req.Host.SupportedHarnesses
+			host.Runtimes = req.Host.Runtimes
+
+			if req.Mode != "" {
+				host.Mode = req.Mode
+			}
+			if len(req.Host.Runtimes) > 0 {
+				host.Type = req.Host.Runtimes[0].Type
+			}
+
 			if err := s.store.UpdateRuntimeHost(ctx, host); err != nil {
 				writeErrorFromErr(w, err, "")
 				return
 			}
-		} else if err == store.ErrNotFound {
+		} else {
 			// Create new host
+			if hostID == "" {
+				hostID = api.NewUUID()
+			}
+
+			host = &store.RuntimeHost{
+				ID:                 hostID,
+				Name:               req.Host.Name,
+				Slug:               api.Slugify(req.Host.Name),
+				Type:               "docker", // Default
+				Mode:               req.Mode,
+				Version:            req.Host.Version,
+				Status:             store.HostStatusOnline,
+				ConnectionState:    "connected",
+				Capabilities:       req.Host.Capabilities,
+				SupportedHarnesses: req.Host.SupportedHarnesses,
+				Runtimes:           req.Host.Runtimes,
+			}
+
+			if host.Mode == "" {
+				host.Mode = store.HostModeConnected
+			}
+
+			// Determine runtime type from runtimes list
+			if len(req.Host.Runtimes) > 0 {
+				host.Type = req.Host.Runtimes[0].Type
+			}
+
 			if err := s.store.CreateRuntimeHost(ctx, host); err != nil {
 				writeErrorFromErr(w, err, "")
 				return
 			}
-		} else {
-			writeErrorFromErr(w, err, "")
-			return
 		}
 
 		// Add as grove contributor

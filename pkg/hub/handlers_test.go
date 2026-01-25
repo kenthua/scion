@@ -459,6 +459,110 @@ func TestGroveRegisterIdempotent(t *testing.T) {
 	}
 }
 
+func TestGroveRegisterCaseInsensitive(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// First registration with "Global" (title case)
+	body1 := map[string]interface{}{
+		"name": "Global",
+	}
+
+	rec1 := doRequest(t, srv, http.MethodPost, "/api/v1/groves/register", body1)
+	if rec1.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	var resp1 RegisterGroveResponse
+	if err := json.NewDecoder(rec1.Body).Decode(&resp1); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp1.Created {
+		t.Error("expected created to be true for first registration")
+	}
+
+	// Second registration with "global" (lowercase) - should match existing grove
+	body2 := map[string]interface{}{
+		"name": "global",
+	}
+
+	rec2 := doRequest(t, srv, http.MethodPost, "/api/v1/groves/register", body2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("expected status 200 for idempotent call, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	var resp2 RegisterGroveResponse
+	if err := json.NewDecoder(rec2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Should return the same grove (case-insensitive match)
+	if resp1.Grove.ID != resp2.Grove.ID {
+		t.Errorf("expected same grove ID for case-insensitive match, got %q and %q", resp1.Grove.ID, resp2.Grove.ID)
+	}
+
+	// Second call should not have created=true
+	if resp2.Created {
+		t.Error("expected created to be false for case-insensitive match")
+	}
+}
+
+func TestGroveRegisterHostDeduplication(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Register a grove with a host
+	body1 := map[string]interface{}{
+		"name":      "Test Grove",
+		"gitRemote": "https://github.com/test/dedup-host",
+		"host": map[string]interface{}{
+			"name":    "test-host",
+			"version": "1.0.0",
+		},
+	}
+
+	rec1 := doRequest(t, srv, http.MethodPost, "/api/v1/groves/register", body1)
+	if rec1.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	var resp1 RegisterGroveResponse
+	if err := json.NewDecoder(rec1.Body).Decode(&resp1); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	hostID1 := resp1.Host.ID
+
+	// Register another grove with the same host name (case-insensitive)
+	body2 := map[string]interface{}{
+		"name":      "Another Grove",
+		"gitRemote": "https://github.com/test/another-grove",
+		"host": map[string]interface{}{
+			"name":    "TEST-HOST", // Different case
+			"version": "1.0.1",
+		},
+	}
+
+	rec2 := doRequest(t, srv, http.MethodPost, "/api/v1/groves/register", body2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	var resp2 RegisterGroveResponse
+	if err := json.NewDecoder(rec2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Should reuse the same host (case-insensitive match)
+	if resp1.Host.ID != resp2.Host.ID {
+		t.Errorf("expected same host ID for case-insensitive match, got %q and %q", hostID1, resp2.Host.ID)
+	}
+
+	// The version should be updated
+	if resp2.Host.Version != "1.0.1" {
+		t.Errorf("expected host version to be updated to '1.0.1', got %q", resp2.Host.Version)
+	}
+}
+
 func TestGroveGetByID(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()

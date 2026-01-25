@@ -680,6 +680,18 @@ func (s *SQLiteStore) GetGroveBySlug(ctx context.Context, slug string) (*store.G
 	return s.GetGrove(ctx, id)
 }
 
+func (s *SQLiteStore) GetGroveBySlugCaseInsensitive(ctx context.Context, slug string) (*store.Grove, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, "SELECT id FROM groves WHERE LOWER(slug) = LOWER(?)", slug).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		return nil, err
+	}
+	return s.GetGrove(ctx, id)
+}
+
 func (s *SQLiteStore) GetGroveByGitRemote(ctx context.Context, gitRemote string) (*store.Grove, error) {
 	var id string
 	err := s.db.QueryRowContext(ctx, "SELECT id FROM groves WHERE git_remote = ?", gitRemote).Scan(&id)
@@ -892,6 +904,18 @@ func (s *SQLiteStore) GetRuntimeHost(ctx context.Context, id string) (*store.Run
 	unmarshalJSON(annotations, &host.Annotations)
 
 	return host, nil
+}
+
+func (s *SQLiteStore) GetRuntimeHostByName(ctx context.Context, name string) (*store.RuntimeHost, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, "SELECT id FROM runtime_hosts WHERE LOWER(name) = LOWER(?)", name).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		return nil, err
+	}
+	return s.GetRuntimeHost(ctx, id)
 }
 
 func (s *SQLiteStore) UpdateRuntimeHost(ctx context.Context, host *store.RuntimeHost) error {

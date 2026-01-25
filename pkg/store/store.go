@@ -108,6 +108,11 @@ type GroveStore interface {
 	// Returns ErrNotFound if the grove doesn't exist.
 	GetGroveBySlug(ctx context.Context, slug string) (*Grove, error)
 
+	// GetGroveBySlugCaseInsensitive retrieves a grove by its slug, ignoring case.
+	// This is useful for matching groves without git remotes (like global groves).
+	// Returns ErrNotFound if the grove doesn't exist.
+	GetGroveBySlugCaseInsensitive(ctx context.Context, slug string) (*Grove, error)
+
 	// GetGroveByGitRemote retrieves a grove by its normalized git remote URL.
 	// Returns ErrNotFound if the grove doesn't exist.
 	GetGroveByGitRemote(ctx context.Context, gitRemote string) (*Grove, error)
@@ -140,6 +145,11 @@ type RuntimeHostStore interface {
 	// GetRuntimeHost retrieves a runtime host by ID.
 	// Returns ErrNotFound if the host doesn't exist.
 	GetRuntimeHost(ctx context.Context, id string) (*RuntimeHost, error)
+
+	// GetRuntimeHostByName retrieves a runtime host by its name (case-insensitive).
+	// This is used to prevent duplicate hosts with the same name.
+	// Returns ErrNotFound if the host doesn't exist.
+	GetRuntimeHostByName(ctx context.Context, name string) (*RuntimeHost, error)
 
 	// UpdateRuntimeHost updates an existing runtime host.
 	// Returns ErrNotFound if the host doesn't exist.

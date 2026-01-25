@@ -17,7 +17,6 @@ import (
 )
 
 var (
-	hubRegisterName   string
 	hubRegisterMode   string
 	hubForceRegister  bool
 	hubOutputJSON     bool
@@ -54,10 +53,11 @@ var hubRegisterCmd = &cobra.Command{
 	Long: `Register this host as a runtime contributor for a grove.
 
 If grove-path is not specified, uses the current project grove or global grove.
+The host is identified by its hostname to prevent duplicate registrations.
 
 This command will:
-1. Create or update the grove in the Hub (matched by git remote)
-2. Register this host as a contributor to the grove
+1. Create or update the grove in the Hub (matched by git remote or name)
+2. Register this host as a contributor to the grove (using hostname as identifier)
 3. Save the returned host token for future authentication
 
 Examples:
@@ -65,10 +65,7 @@ Examples:
   scion hub register
 
   # Register the global grove
-  scion hub register --global
-
-  # Register with a specific name
-  scion hub register --name "Dev Laptop"`,
+  scion hub register --global`,
 	RunE: runHubRegister,
 }
 
@@ -111,7 +108,6 @@ func init() {
 	hubCmd.AddCommand(hubHostsCmd)
 
 	// Register flags
-	hubRegisterCmd.Flags().StringVar(&hubRegisterName, "name", "", "Name for this host (defaults to hostname)")
 	hubRegisterCmd.Flags().StringVar(&hubRegisterMode, "mode", "connected", "Registration mode (connected, read-only)")
 	hubRegisterCmd.Flags().BoolVar(&hubForceRegister, "force", false, "Force re-registration even if already registered")
 
@@ -272,14 +268,10 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 		groveName = util.ExtractRepoName(gitRemote)
 	}
 
-	// Get hostname
-	hostName := hubRegisterName
-	if hostName == "" {
-		if h, err := os.Hostname(); err == nil {
-			hostName = h
-		} else {
-			hostName = "local-host"
-		}
+	// Get hostname (always use system hostname to prevent duplicates)
+	hostName, err := os.Hostname()
+	if err != nil {
+		hostName = "local-host"
 	}
 
 	// Detect runtime
