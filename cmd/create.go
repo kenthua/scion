@@ -76,11 +76,16 @@ The agent will be created from a template.`,
 func createAgentViaHub(hubCtx *HubContext, agentName string) error {
 	PrintUsingHub(hubCtx.Endpoint)
 
+	// Get the grove ID from the git remote
+	groveID, err := GetGroveIDFromGitRemote(hubCtx)
+	if err != nil {
+		return wrapHubError(err)
+	}
+
 	// Build create request
-	// Note: We need to get the grove ID from Hub for this grove
-	// For now, we'll need to look it up or require registration first
 	req := &hubclient.CreateAgentRequest{
 		Name:     agentName,
+		GroveID:  groveID,
 		Template: templateName,
 		Branch:   branch,
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/hubclient"
+	"github.com/ptone/scion-agent/pkg/util"
 	"github.com/spf13/cobra"
 )
 
@@ -85,6 +86,33 @@ func PrintUsingHub(endpoint string) {
 // wrapHubError wraps a Hub error with guidance to disable Hub integration.
 func wrapHubError(err error) error {
 	return fmt.Errorf("%w\n\nTo use local-only mode, run: scion hub disable", err)
+}
+
+// GetGroveIDFromGitRemote looks up the grove ID from the Hub based on the git remote.
+// Returns the grove ID if found, or an error if the grove is not registered.
+func GetGroveIDFromGitRemote(hubCtx *HubContext) (string, error) {
+	gitRemote := util.GetGitRemote()
+	if gitRemote == "" {
+		return "", fmt.Errorf("could not determine git remote for this project.\n\nRun 'scion hub register' to register this grove with the Hub, or use --no-hub for local-only mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Look up groves by git remote
+	resp, err := hubCtx.Client.Groves().List(ctx, &hubclient.ListGrovesOptions{
+		GitRemote: gitRemote,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to look up grove by git remote: %w", err)
+	}
+
+	if len(resp.Groves) == 0 {
+		return "", fmt.Errorf("no grove found for git remote: %s\n\nRun 'scion hub register' to register this grove with the Hub", gitRemote)
+	}
+
+	// Return the first matching grove
+	return resp.Groves[0].ID, nil
 }
 
 func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
@@ -189,9 +217,16 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		return fmt.Errorf("attach mode is not yet supported when using Hub integration\n\nTo attach locally, use: scion --no-hub start -a %s", agentName)
 	}
 
+	// Get the grove ID from the git remote
+	groveID, err := GetGroveIDFromGitRemote(hubCtx)
+	if err != nil {
+		return wrapHubError(err)
+	}
+
 	// Build create request (Hub creates and starts in one operation)
 	req := &hubclient.CreateAgentRequest{
 		Name:     agentName,
+		GroveID:  groveID,
 		Template: templateName,
 		Task:     task,
 		Branch:   branch,

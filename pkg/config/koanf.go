@@ -28,13 +28,25 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 	}
 
 	// 2. Load global settings (~/.scion/settings.yaml or .json)
-	if globalDir, err := GetGlobalDir(); err == nil {
+	globalDir, _ := GetGlobalDir()
+	if globalDir != "" {
 		loadSettingsFile(k, globalDir)
 	}
 
 	// 3. Load grove settings
-	if grovePath != "" {
-		loadSettingsFile(k, grovePath)
+	// If grovePath is empty, try to find the project grove
+	effectiveGrovePath := grovePath
+	if effectiveGrovePath == "" {
+		if projectPath, ok := FindProjectRoot(); ok {
+			effectiveGrovePath = projectPath
+		}
+	} else if effectiveGrovePath == "global" || effectiveGrovePath == "home" {
+		// For global/home, we already loaded global settings above
+		effectiveGrovePath = ""
+	}
+	// Only load grove settings if it's different from global (avoid double-loading)
+	if effectiveGrovePath != "" && effectiveGrovePath != globalDir {
+		loadSettingsFile(k, effectiveGrovePath)
 	}
 
 	// 4. Load environment variables (SCION_ prefix, top-level only)

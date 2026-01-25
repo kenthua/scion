@@ -197,7 +197,13 @@ func getHubClient(settings *config.Settings) (hubclient.Client, error) {
 }
 
 func runHubStatus(cmd *cobra.Command, args []string) error {
-	settings, err := config.LoadSettings(grovePath)
+	// Resolve grove path to find project settings
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
 	if err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
@@ -408,7 +414,13 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 }
 
 func runHubDeregister(cmd *cobra.Command, args []string) error {
-	settings, err := config.LoadSettings(grovePath)
+	// Resolve grove path to find project settings
+	resolvedPath, isGlobal, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
 	if err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
@@ -432,18 +444,21 @@ func runHubDeregister(cmd *cobra.Command, args []string) error {
 	}
 
 	// Clear the stored credentials
-	resolvedPath, isGlobal, err := config.ResolveGrovePath(grovePath)
-	if err == nil {
-		_ = config.UpdateSetting(resolvedPath, "hub.hostToken", "", isGlobal)
-		_ = config.UpdateSetting(resolvedPath, "hub.hostId", "", isGlobal)
-	}
+	_ = config.UpdateSetting(resolvedPath, "hub.hostToken", "", isGlobal)
+	_ = config.UpdateSetting(resolvedPath, "hub.hostId", "", isGlobal)
 
 	fmt.Printf("Host %s deregistered from Hub\n", hostID)
 	return nil
 }
 
 func runHubGroves(cmd *cobra.Command, args []string) error {
-	settings, err := config.LoadSettings(grovePath)
+	// Resolve grove path to find project settings
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
 	if err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
@@ -486,7 +501,13 @@ func runHubGroves(cmd *cobra.Command, args []string) error {
 }
 
 func runHubHosts(cmd *cobra.Command, args []string) error {
-	settings, err := config.LoadSettings(grovePath)
+	// Resolve grove path to find project settings
+	resolvedPath, _, err := config.ResolveGrovePath(grovePath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve grove path: %w", err)
+	}
+
+	settings, err := config.LoadSettings(resolvedPath)
 	if err != nil {
 		return fmt.Errorf("failed to load settings: %w", err)
 	}
