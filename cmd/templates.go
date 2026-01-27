@@ -291,7 +291,7 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 	// Get grove ID for grove scope
 	var groveID string
 	if scope == "grove" {
-		groveID, err = GetGroveIDFromGitRemote(hubCtx)
+		groveID, err = GetGroveID(hubCtx)
 		if err != nil {
 			return err
 		}

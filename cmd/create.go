@@ -76,8 +76,8 @@ The agent will be created from a template.`,
 func createAgentViaHub(hubCtx *HubContext, agentName string) error {
 	PrintUsingHub(hubCtx.Endpoint)
 
-	// Get the grove ID from the git remote
-	groveID, err := GetGroveIDFromGitRemote(hubCtx)
+	// Get the grove ID for this project
+	groveID, err := GetGroveID(hubCtx)
 	if err != nil {
 		return wrapHubError(err)
 	}

@@ -91,9 +91,19 @@ func wrapHubError(err error) error {
 	return fmt.Errorf("%w\n\nTo use local-only mode, run: scion hub disable", err)
 }
 
-// GetGroveIDFromGitRemote looks up the grove ID from the Hub based on the git remote.
+// GetGroveID looks up the grove ID from settings or the Hub.
+// Priority:
+//  1. Local grove_id from settings (for non-git groves or explicit configuration)
+//  2. Git remote lookup via Hub API
+//
 // Returns the grove ID if found, or an error if the grove is not registered.
-func GetGroveIDFromGitRemote(hubCtx *HubContext) (string, error) {
+func GetGroveID(hubCtx *HubContext) (string, error) {
+	// First, check if there's a local grove_id in settings
+	if hubCtx.Settings != nil && hubCtx.Settings.GroveID != "" {
+		return hubCtx.Settings.GroveID, nil
+	}
+
+	// Fall back to git remote lookup
 	gitRemote := util.GetGitRemote()
 	if gitRemote == "" {
 		return "", fmt.Errorf("no git origin remote found for this project.\n\nThe Hub uses the origin remote URL to identify groves.\nRun 'scion hub register' to register this grove with the Hub, or use --no-hub for local-only mode")
@@ -220,8 +230,8 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		return fmt.Errorf("attach mode is not yet supported when using Hub integration\n\nTo attach locally, use: scion --no-hub start -a %s", agentName)
 	}
 
-	// Get the grove ID from the git remote
-	groveID, err := GetGroveIDFromGitRemote(hubCtx)
+	// Get the grove ID for this project
+	groveID, err := GetGroveID(hubCtx)
 	if err != nil {
 		return wrapHubError(err)
 	}

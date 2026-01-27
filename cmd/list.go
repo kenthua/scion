@@ -80,7 +80,7 @@ func listAgentsViaHub(hubCtx *HubContext) error {
 
 	if !listAll {
 		// Get the grove ID for the current project
-		groveID, err := GetGroveIDFromGitRemote(hubCtx)
+		groveID, err := GetGroveID(hubCtx)
 		if err != nil {
 			return wrapHubError(err)
 		}
