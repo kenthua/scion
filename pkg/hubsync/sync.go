@@ -13,6 +13,18 @@ import (
 	"github.com/ptone/scion-agent/pkg/util"
 )
 
+// debugEnabled returns true if SCION_DEBUG or SCION_DEBUG_HUBSYNC is set.
+func debugEnabled() bool {
+	return os.Getenv("SCION_DEBUG") != "" || os.Getenv("SCION_DEBUG_HUBSYNC") != ""
+}
+
+// debugf prints a debug message if debug mode is enabled.
+func debugf(format string, args ...interface{}) {
+	if debugEnabled() {
+		fmt.Fprintf(os.Stderr, "[hubsync] "+format+"\n", args...)
+	}
+}
+
 // AgentRef holds both name and ID for an agent.
 // Name is used for display, ID is used for API calls.
 type AgentRef struct {
@@ -104,8 +116,11 @@ type EnsureHubReadyOptions struct {
 // 7. Check grove registration (prompt to register if not)
 // 8. Compare and sync agents (unless SkipSync is true)
 func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, error) {
+	debugf("EnsureHubReady: grovePath=%s, opts=%+v", grovePath, opts)
+
 	// Check if --no-hub flag is set
 	if opts.NoHub {
+		debugf("NoHub flag set, returning nil")
 		return nil, nil
 	}
 
@@ -184,6 +199,9 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 		IsGlobal:  isGlobal,
 	}
 
+	debugf("HubContext created: endpoint=%s, groveID=%s, hostID=%s, grovePath=%s, isGlobal=%v",
+		endpoint, groveID, hostID, resolvedPath, isGlobal)
+
 	// Check grove registration
 	registered, err := isGroveRegistered(ctx, hubCtx)
 	if err != nil {
@@ -251,11 +269,15 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error) {
 	result := &SyncResult{}
 
+	debugf("CompareAgents starting: groveID=%s, hostID=%s, grovePath=%s",
+		hubCtx.GroveID, hubCtx.HostID, hubCtx.GrovePath)
+
 	// Get local agents
 	localAgents, err := GetLocalAgents(hubCtx.GrovePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get local agents: %w", err)
 	}
+	debugf("Local agents found: %v", localAgents)
 
 	// Get Hub agents for this grove and host
 	ctxTimeout, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -269,6 +291,12 @@ func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error)
 	resp, err := hubCtx.Client.Agents().List(ctxTimeout, opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Hub agents: %w", err)
+	}
+
+	debugf("Hub agents found: %d total", len(resp.Agents))
+	for _, a := range resp.Agents {
+		debugf("  - Hub agent: name=%s, id=%s, status=%s, hostID=%s",
+			a.Name, a.ID, a.Status, a.RuntimeHostID)
 	}
 
 	// Build map of Hub agents
@@ -300,11 +328,16 @@ func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error)
 			if a.Status == "pending" {
 				// Track pending agents separately - they don't require sync
 				result.Pending = append(result.Pending, AgentRef{Name: a.Name, ID: a.ID})
+				debugf("Agent %s (id=%s) is pending, not requiring sync", a.Name, a.ID)
 			} else {
 				result.ToRemove = append(result.ToRemove, AgentRef{Name: a.Name, ID: a.ID})
+				debugf("Agent %s (id=%s) on Hub but not local, marking for removal", a.Name, a.ID)
 			}
 		}
 	}
+
+	debugf("Sync result: toRegister=%v, toRemove=%d, pending=%d, inSync=%d",
+		result.ToRegister, len(result.ToRemove), len(result.Pending), len(result.InSync))
 
 	return result, nil
 }
@@ -314,25 +347,36 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult) er
 	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
+	debugf("ExecuteSync starting: groveID=%s, hostID=%s", hubCtx.GroveID, hubCtx.HostID)
+
 	// Register local agents on Hub
 	for _, name := range result.ToRegister {
 		fmt.Printf("Registering agent '%s' on Hub...\n", name)
+		debugf("Creating agent: name=%s, groveID=%s, hostID=%s", name, hubCtx.GroveID, hubCtx.HostID)
 		req := &hubclient.CreateAgentRequest{
 			Name:          name,
 			GroveID:       hubCtx.GroveID,
 			RuntimeHostID: hubCtx.HostID,
 		}
-		if _, err := hubCtx.Client.Agents().Create(ctxTimeout, req); err != nil {
+		resp, err := hubCtx.Client.Agents().Create(ctxTimeout, req)
+		if err != nil {
+			debugf("Failed to register agent '%s': %v", name, err)
 			return fmt.Errorf("failed to register agent '%s': %w", name, err)
 		}
+		debugf("Agent '%s' created with ID: %s", name, resp.Agent.ID)
 	}
 
 	// Remove Hub agents that are not on this host
 	for _, ref := range result.ToRemove {
 		fmt.Printf("Removing agent '%s' from Hub...\n", ref.Name)
-		if err := hubCtx.Client.Agents().Delete(ctxTimeout, ref.ID, nil); err != nil {
+		debugf("Deleting agent via grove-scoped endpoint: name=%s, id=%s, groveID=%s",
+			ref.Name, ref.ID, hubCtx.GroveID)
+		// Use grove-scoped endpoint which supports both ID and slug lookup
+		if err := hubCtx.Client.Groves().DeleteAgent(ctxTimeout, hubCtx.GroveID, ref.ID, nil); err != nil {
+			debugf("Failed to remove agent '%s' (id=%s): %v", ref.Name, ref.ID, err)
 			return fmt.Errorf("failed to remove agent '%s': %w", ref.Name, err)
 		}
+		debugf("Agent '%s' removed successfully", ref.Name)
 	}
 
 	if len(result.ToRegister) > 0 || len(result.ToRemove) > 0 {

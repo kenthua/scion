@@ -37,6 +37,12 @@ type GroveService interface {
 	// RemoveContributor removes a host from a grove.
 	RemoveContributor(ctx context.Context, groveID, hostID string) error
 
+	// GetAgent returns an agent by ID or slug within a grove.
+	GetAgent(ctx context.Context, groveID, agentID string) (*Agent, error)
+
+	// DeleteAgent removes an agent by ID or slug within a grove.
+	DeleteAgent(ctx context.Context, groveID, agentID string, opts *DeleteAgentOptions) error
+
 	// GetSettings retrieves grove settings.
 	GetSettings(ctx context.Context, groveID string) (*GroveSettings, error)
 
@@ -283,4 +289,36 @@ func (s *groveService) UpdateSettings(ctx context.Context, groveID string, setti
 		return nil, err
 	}
 	return apiclient.DecodeResponse[GroveSettings](resp)
+}
+
+// GetAgent returns an agent by ID or slug within a grove.
+func (s *groveService) GetAgent(ctx context.Context, groveID, agentID string) (*Agent, error) {
+	resp, err := s.c.transport.Get(ctx, "/api/v1/groves/"+groveID+"/agents/"+agentID, nil)
+	if err != nil {
+		return nil, err
+	}
+	return apiclient.DecodeResponse[Agent](resp)
+}
+
+// DeleteAgent removes an agent by ID or slug within a grove.
+func (s *groveService) DeleteAgent(ctx context.Context, groveID, agentID string, opts *DeleteAgentOptions) error {
+	path := "/api/v1/groves/" + groveID + "/agents/" + agentID
+	if opts != nil {
+		query := url.Values{}
+		if opts.DeleteFiles {
+			query.Set("deleteFiles", "true")
+		}
+		if opts.RemoveBranch {
+			query.Set("removeBranch", "true")
+		}
+		if len(query) > 0 {
+			path += "?" + query.Encode()
+		}
+	}
+
+	resp, err := s.c.transport.Delete(ctx, path, nil)
+	if err != nil {
+		return err
+	}
+	return apiclient.CheckResponse(resp)
 }
