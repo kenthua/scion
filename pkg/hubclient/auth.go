@@ -22,6 +22,12 @@ type AuthService interface {
 
 	// GetWSTicket gets a short-lived WebSocket authentication ticket.
 	GetWSTicket(ctx context.Context) (*WSTicketResponse, error)
+
+	// GetAuthURL returns the OAuth authorization URL for CLI login.
+	GetAuthURL(ctx context.Context, callbackURL, state string) (*AuthURLResponse, error)
+
+	// ExchangeCode exchanges an authorization code for tokens.
+	ExchangeCode(ctx context.Context, code, callbackURL string) (*CLITokenResponse, error)
 }
 
 // authService is the implementation of AuthService.
@@ -54,6 +60,19 @@ type TokenResponse struct {
 type WSTicketResponse struct {
 	Ticket    string `json:"ticket"`
 	ExpiresAt string `json:"expiresAt"`
+}
+
+// AuthURLResponse is the response containing the OAuth authorization URL.
+type AuthURLResponse struct {
+	URL string `json:"url"`
+}
+
+// CLITokenResponse is the response from CLI token exchange.
+type CLITokenResponse struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	ExpiresIn    int64  `json:"expiresIn"` // seconds
+	User         *User  `json:"user,omitempty"`
 }
 
 // Login performs user login.
@@ -104,4 +123,36 @@ func (s *authService) GetWSTicket(ctx context.Context) (*WSTicketResponse, error
 		return nil, err
 	}
 	return apiclient.DecodeResponse[WSTicketResponse](resp)
+}
+
+// GetAuthURL returns the OAuth authorization URL for CLI login.
+func (s *authService) GetAuthURL(ctx context.Context, callbackURL, state string) (*AuthURLResponse, error) {
+	body := struct {
+		CallbackURL string `json:"callbackUrl"`
+		State       string `json:"state"`
+	}{
+		CallbackURL: callbackURL,
+		State:       state,
+	}
+	resp, err := s.c.transport.Post(ctx, "/api/v1/auth/cli/authorize", body, nil)
+	if err != nil {
+		return nil, err
+	}
+	return apiclient.DecodeResponse[AuthURLResponse](resp)
+}
+
+// ExchangeCode exchanges an authorization code for tokens.
+func (s *authService) ExchangeCode(ctx context.Context, code, callbackURL string) (*CLITokenResponse, error) {
+	body := struct {
+		Code        string `json:"code"`
+		CallbackURL string `json:"callbackUrl"`
+	}{
+		Code:        code,
+		CallbackURL: callbackURL,
+	}
+	resp, err := s.c.transport.Post(ctx, "/api/v1/auth/cli/token", body, nil)
+	if err != nil {
+		return nil, err
+	}
+	return apiclient.DecodeResponse[CLITokenResponse](resp)
 }
