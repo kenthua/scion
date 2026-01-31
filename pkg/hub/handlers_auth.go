@@ -2,6 +2,7 @@ package hub
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -536,6 +537,10 @@ func (s *Server) handleCLIAuthAuthorize(w http.ResponseWriter, r *http.Request) 
 
 	// Check if OAuth service is configured
 	if s.oauthService == nil {
+		if s.config.Debug {
+			log.Printf("[Hub] CLI auth authorize request for provider %q failed: OAuth service is nil", provider)
+			log.Printf("[Hub] Check environment variables SCION_SERVER_OAUTH_CLI_*_CLIENTID/CLIENTSECRET")
+		}
 		writeError(w, http.StatusNotImplemented, "not_implemented",
 			"OAuth is not configured on this server", nil)
 		return
@@ -591,6 +596,9 @@ func (s *Server) handleCLIAuthToken(w http.ResponseWriter, r *http.Request) {
 
 	// Check if OAuth service is configured
 	if s.oauthService == nil {
+		if s.config.Debug {
+			log.Printf("[Hub] CLI auth token exchange for provider %q failed: OAuth service is nil", provider)
+		}
 		writeError(w, http.StatusNotImplemented, "not_implemented",
 			"OAuth is not configured on this server", nil)
 		return

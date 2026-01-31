@@ -210,6 +210,15 @@ func New(cfg ServerConfig, s store.Store) *Server {
 	if cfg.OAuthConfig.IsConfigured() {
 		srv.oauthService = NewOAuthService(cfg.OAuthConfig)
 		log.Printf("[Hub] OAuth service initialized")
+		// Log which providers are configured
+		logOAuthProviders("Web", cfg.OAuthConfig.Web)
+		logOAuthProviders("CLI", cfg.OAuthConfig.CLI)
+	} else {
+		log.Printf("[Hub] OAuth service NOT configured - no providers available")
+		log.Printf("[Hub] To enable OAuth, set environment variables:")
+		log.Printf("[Hub]   SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTID")
+		log.Printf("[Hub]   SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTSECRET")
+		log.Printf("[Hub]   (or use server.yaml configuration)")
 	}
 
 	// Build unified auth configuration
@@ -506,6 +515,25 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// logOAuthProviders logs which OAuth providers are configured for a client type.
+func logOAuthProviders(clientType string, cfg OAuthClientConfig) {
+	googleConfigured := cfg.Google.ClientID != "" && cfg.Google.ClientSecret != ""
+	githubConfigured := cfg.GitHub.ClientID != "" && cfg.GitHub.ClientSecret != ""
+
+	if googleConfigured || githubConfigured {
+		var providers []string
+		if googleConfigured {
+			providers = append(providers, "Google")
+		}
+		if githubConfigured {
+			providers = append(providers, "GitHub")
+		}
+		log.Printf("[Hub]   %s OAuth: %s", clientType, strings.Join(providers, ", "))
+	} else {
+		log.Printf("[Hub]   %s OAuth: none configured", clientType)
+	}
 }
 
 // Helper functions

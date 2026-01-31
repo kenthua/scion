@@ -164,3 +164,69 @@ func TestLoadGlobalConfigEnvOverride(t *testing.T) {
 		t.Errorf("expected database driver 'postgres' from env, got %q", cfg.Database.Driver)
 	}
 }
+
+func TestEnvKeyToConfigKey(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"HUB_PORT", "hub.port"},
+		{"DATABASE_DRIVER", "database.driver"},
+		{"OAUTH_CLI_GOOGLE_CLIENTID", "oauth.cli.google.clientId"},
+		{"OAUTH_CLI_GOOGLE_CLIENTSECRET", "oauth.cli.google.clientSecret"},
+		{"OAUTH_WEB_GITHUB_CLIENTID", "oauth.web.github.clientId"},
+		{"OAUTH_WEB_GITHUB_CLIENTSECRET", "oauth.web.github.clientSecret"},
+		{"RUNTIMEHOST_READTIMEOUT", "runtimehost.readTimeout"},
+		{"RUNTIMEHOST_WRITETIMEOUT", "runtimehost.writeTimeout"},
+		{"RUNTIMEHOST_HOSTID", "runtimehost.hostId"},
+		{"RUNTIMEHOST_HOSTNAME", "runtimehost.hostName"},
+		{"AUTH_DEVMODE", "auth.devMode"},
+		{"AUTH_DEVTOKEN", "auth.devToken"},
+		{"LOGLEVEL", "logLevel"},
+		{"LOGFORMAT", "logFormat"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := envKeyToConfigKey(tc.input)
+			if got != tc.expected {
+				t.Errorf("envKeyToConfigKey(%q) = %q, want %q", tc.input, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestLoadGlobalConfigOAuthEnvOverride(t *testing.T) {
+	// Set OAuth environment variables
+	os.Setenv("SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTID", "test-cli-client-id")
+	os.Setenv("SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTSECRET", "test-cli-secret")
+	os.Setenv("SCION_SERVER_OAUTH_WEB_GITHUB_CLIENTID", "test-web-gh-id")
+	os.Setenv("SCION_SERVER_OAUTH_WEB_GITHUB_CLIENTSECRET", "test-web-gh-secret")
+	defer func() {
+		os.Unsetenv("SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTID")
+		os.Unsetenv("SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTSECRET")
+		os.Unsetenv("SCION_SERVER_OAUTH_WEB_GITHUB_CLIENTID")
+		os.Unsetenv("SCION_SERVER_OAUTH_WEB_GITHUB_CLIENTSECRET")
+	}()
+
+	cfg, err := LoadGlobalConfig("")
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	if cfg.OAuth.CLI.Google.ClientID != "test-cli-client-id" {
+		t.Errorf("expected CLI Google ClientID 'test-cli-client-id', got %q", cfg.OAuth.CLI.Google.ClientID)
+	}
+
+	if cfg.OAuth.CLI.Google.ClientSecret != "test-cli-secret" {
+		t.Errorf("expected CLI Google ClientSecret 'test-cli-secret', got %q", cfg.OAuth.CLI.Google.ClientSecret)
+	}
+
+	if cfg.OAuth.Web.GitHub.ClientID != "test-web-gh-id" {
+		t.Errorf("expected Web GitHub ClientID 'test-web-gh-id', got %q", cfg.OAuth.Web.GitHub.ClientID)
+	}
+
+	if cfg.OAuth.Web.GitHub.ClientSecret != "test-web-gh-secret" {
+		t.Errorf("expected Web GitHub ClientSecret 'test-web-gh-secret', got %q", cfg.OAuth.Web.GitHub.ClientSecret)
+	}
+}

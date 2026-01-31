@@ -252,10 +252,11 @@ func LoadGlobalConfig(configPath string) (*GlobalConfig, error) {
 	// Maps: SCION_SERVER_HUB_PORT -> hub.port
 	//       SCION_SERVER_DATABASE_DRIVER -> database.driver
 	//       SCION_SERVER_LOG_LEVEL -> logLevel
+	//       SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTID -> oauth.cli.google.clientId
 	_ = k.Load(env.Provider("SCION_SERVER_", ".", func(s string) string {
-		key := strings.ToLower(strings.TrimPrefix(s, "SCION_SERVER_"))
-		// Replace underscores with dots for nested keys
-		key = strings.Replace(key, "_", ".", -1)
+		key := strings.TrimPrefix(s, "SCION_SERVER_")
+		// Replace underscores with dots for nested keys and handle camelCase
+		key = envKeyToConfigKey(key)
 		return key
 	}), nil)
 
@@ -287,6 +288,37 @@ func LoadGlobalConfig(configPath string) (*GlobalConfig, error) {
 	}
 
 	return config, nil
+}
+
+// envKeyToConfigKey converts an environment variable key to a config key.
+// Handles camelCase conversion for known fields like clientId, clientSecret.
+// Example: OAUTH_CLI_GOOGLE_CLIENTID -> oauth.cli.google.clientId
+func envKeyToConfigKey(envKey string) string {
+	// Known camelCase field mappings
+	camelCaseFields := map[string]string{
+		"clientid":     "clientId",
+		"clientsecret": "clientSecret",
+		"readtimeout":  "readTimeout",
+		"writetimeout": "writeTimeout",
+		"hostid":       "hostId",
+		"hostname":     "hostName",
+		"hubendpoint":  "hubEndpoint",
+		"devmode":      "devMode",
+		"devtoken":     "devToken",
+		"devtokenfile": "devTokenFile",
+		"loglevel":     "logLevel",
+		"logformat":    "logFormat",
+	}
+
+	// Split by underscore, convert each part
+	parts := strings.Split(strings.ToLower(envKey), "_")
+	for i, part := range parts {
+		if replacement, ok := camelCaseFields[part]; ok {
+			parts[i] = replacement
+		}
+	}
+
+	return strings.Join(parts, ".")
 }
 
 // loadServerConfigFile loads server config from a directory

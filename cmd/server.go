@@ -203,6 +203,8 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	// Log debug mode status
 	if enableDebug {
 		log.Println("Debug logging enabled")
+		// Log OAuth configuration for debugging
+		logOAuthDebug(cfg)
 	}
 
 	// Setup graceful shutdown
@@ -758,6 +760,31 @@ func (d *agentDispatcherAdapter) DispatchAgentMessage(ctx context.Context, hubAg
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 	return nil
+}
+
+// logOAuthDebug logs OAuth configuration details for debugging.
+// Secrets are redacted to only show whether they are set.
+func logOAuthDebug(cfg *config.GlobalConfig) {
+	log.Println("[Debug] OAuth Configuration:")
+	log.Printf("[Debug]   CLI Google ClientID: %s", redactForDebug(cfg.OAuth.CLI.Google.ClientID))
+	log.Printf("[Debug]   CLI Google ClientSecret: %s", redactForDebug(cfg.OAuth.CLI.Google.ClientSecret))
+	log.Printf("[Debug]   CLI GitHub ClientID: %s", redactForDebug(cfg.OAuth.CLI.GitHub.ClientID))
+	log.Printf("[Debug]   CLI GitHub ClientSecret: %s", redactForDebug(cfg.OAuth.CLI.GitHub.ClientSecret))
+	log.Printf("[Debug]   Web Google ClientID: %s", redactForDebug(cfg.OAuth.Web.Google.ClientID))
+	log.Printf("[Debug]   Web Google ClientSecret: %s", redactForDebug(cfg.OAuth.Web.Google.ClientSecret))
+	log.Printf("[Debug]   Web GitHub ClientID: %s", redactForDebug(cfg.OAuth.Web.GitHub.ClientID))
+	log.Printf("[Debug]   Web GitHub ClientSecret: %s", redactForDebug(cfg.OAuth.Web.GitHub.ClientSecret))
+}
+
+// redactForDebug returns a redacted version of a secret for debug logging.
+func redactForDebug(value string) string {
+	if value == "" {
+		return "(not set)"
+	}
+	if len(value) <= 8 {
+		return "(set, " + fmt.Sprintf("%d", len(value)) + " chars)"
+	}
+	return value[:4] + "..." + value[len(value)-4:] + " (" + fmt.Sprintf("%d", len(value)) + " chars)"
 }
 
 func init() {
