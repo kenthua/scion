@@ -1,7 +1,7 @@
 # sciontool Agent-to-Hub Authentication
 
 ## Status
-**Proposed**
+**Implemented** (2026-01-31)
 
 ## 1. Overview
 
@@ -126,3 +126,36 @@ The Hub's private key used for signing these tokens must be protected. In a dist
 2. **Provisioning**: Update the agent provisioning flow to call this function and pass the token to the `RuntimeHost`.
 3. **`sciontool` Update**: Update `pkg/sciontool` to use the `SCION_HUB_TOKEN` from the environment if available.
 4. **Middleware**: Add a `Bearer` token validation path in the Hub's authentication middleware that specifically handles these Hub-issued agent JWTs.
+
+---
+
+## 7. Implementation Notes
+
+*Added: 2026-01-31*
+
+### Files Created/Modified
+
+| File | Description |
+|------|-------------|
+| `pkg/hub/agenttoken.go` | AgentTokenService with JWT generation/validation using go-jose |
+| `pkg/hub/agenttoken_test.go` | Comprehensive tests for token service and middleware |
+| `pkg/sciontool/hub/client.go` | Hub API client for sciontool using SCION_HUB_TOKEN |
+| `pkg/sciontool/hub/client_test.go` | Tests for the sciontool hub client |
+| `pkg/hub/server.go` | Updated to initialize AgentTokenService |
+| `pkg/hub/devauth.go` | Updated to allow agent tokens to bypass dev auth |
+| `pkg/hub/httpdispatcher.go` | Updated to generate and include agent tokens |
+| `pkg/runtimehost/handlers.go` | Updated to pass token as SCION_HUB_TOKEN env var |
+| `cmd/sciontool/commands/status.go` | Updated to report to Hub in hosted mode |
+
+### Key Design Decisions
+
+1. **HS256 (Symmetric) Signing**: Initial implementation uses HS256 for simplicity. RS256 can be configured for production deployments where asymmetric signing is preferred.
+
+2. **Token in Custom Header**: Agents use `X-Scion-Agent-Token` header to avoid conflicts with user Bearer tokens. The middleware also accepts standard `Authorization: Bearer` for flexibility.
+
+3. **Scope-Based Authorization**: The `scopes` claim enables fine-grained permissions. Default scope is `agent:status:update`.
+
+4. **Environment Variables**: Tokens are passed to containers via:
+   - `SCION_HUB_TOKEN`: The JWT token
+   - `SCION_HUB_URL`: The Hub API endpoint
+   - `SCION_AGENT_ID`: The agent's unique ID
