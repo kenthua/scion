@@ -213,3 +213,15 @@ func WithAutoDevAuth() Option {
 		}
 	}
 }
+
+// WithHMACAuth sets HMAC-based host authentication.
+// This is used by Runtime Hosts to authenticate with the Hub using
+// the shared secret established during the join process.
+func WithHMACAuth(hostID string, secretKey []byte) Option {
+	return func(c *client) {
+		c.transport.Auth = &apiclient.HMACAuth{
+			HostID:    hostID,
+			SecretKey: secretKey,
+		}
+	}
+}

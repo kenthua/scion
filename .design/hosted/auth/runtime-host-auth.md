@@ -1,7 +1,7 @@
 # Runtime Host Authentication Design
 
 ## Status
-**Phase 1 Implemented** (Core Infrastructure)
+**Phase 2 Implemented** (Runtime Host Integration)
 
 ## 1. Overview
 
@@ -690,11 +690,19 @@ Rationale:
 - Secret keys are 256-bit (32 bytes) generated via `crypto/rand`
 - Database migration V8 adds `host_secrets` and `host_join_tokens` tables with FK cascade delete
 
-### Phase 2: Runtime Host Integration
-- [ ] Add HMAC signing to `hubclient` package
-- [ ] Implement local credential storage
-- [ ] Add host-side signature verification
-- [ ] Implement heartbeat/status reporting
+### Phase 2: Runtime Host Integration ✓
+- [x] Add HMAC signing to `hubclient` package (`pkg/apiclient/hmac.go`, `hubclient.WithHMACAuth()`)
+- [x] Implement local credential storage (`pkg/hostcredentials/store.go`)
+- [x] Add host-side signature verification (`pkg/runtimehost/hostauth.go`)
+- [x] Implement heartbeat/status reporting (`pkg/runtimehost/heartbeat.go`)
+
+**Implementation Notes (Phase 2):**
+- `HMACAuth` implements `apiclient.Authenticator` for signing outgoing requests
+- `BuildCanonicalString` and `ComputeHMAC` are exported for use by both client and server
+- `HostCredentials` stored in `~/.scion/host-credentials.json` with 0600 permissions
+- `HeartbeatService` runs background goroutine sending heartbeats at configurable interval (default 30s)
+- `HostAuthMiddleware` verifies incoming Hub requests using shared secret
+- Server integration loads credentials on startup and configures HMAC auth automatically
 
 ### Phase 3: Bidirectional Communication
 - [ ] Add Hub→Host HTTP client with HMAC signing

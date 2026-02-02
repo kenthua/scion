@@ -5,6 +5,7 @@ package runtimehost
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/ptone/scion-agent/pkg/agent"
 	"github.com/ptone/scion-agent/pkg/config"
+	"github.com/ptone/scion-agent/pkg/hostcredentials"
 	"github.com/ptone/scion-agent/pkg/hubclient"
 	"github.com/ptone/scion-agent/pkg/runtime"
 	"github.com/ptone/scion-agent/pkg/templatecache"
@@ -67,6 +69,22 @@ type ServerConfig struct {
 	// TemplateCacheMaxSize is the maximum size of the template cache in bytes.
 	// Defaults to 100MB if not specified.
 	TemplateCacheMaxSize int64
+
+	// Host credentials settings
+	// HostCredentialsPath is the path to the host credentials file.
+	// If set, HMAC authentication will be used instead of bearer tokens.
+	// Defaults to ~/.scion/host-credentials.json if not specified.
+	HostCredentialsPath string
+
+	// HostAuthEnabled enables HMAC verification for incoming requests from the Hub.
+	HostAuthEnabled bool
+
+	// Heartbeat settings
+	// HeartbeatEnabled enables periodic heartbeats to the Hub.
+	HeartbeatEnabled bool
+	// HeartbeatInterval is the time between heartbeats.
+	// Defaults to 30 seconds if not specified.
+	HeartbeatInterval time.Duration
 }
 
 // DefaultServerConfig returns the default server configuration.
@@ -80,7 +98,7 @@ func DefaultServerConfig() ServerConfig {
 		CORSEnabled:  true,
 		CORSAllowedOrigins: []string{"*"},
 		CORSAllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		CORSAllowedHeaders: []string{"Authorization", "Content-Type", "X-Scion-Host-Token", "X-API-Key"},
+		CORSAllowedHeaders: []string{"Authorization", "Content-Type", "X-Scion-Host-Token", "X-API-Key", "X-Scion-Host-ID", "X-Scion-Timestamp", "X-Scion-Nonce", "X-Scion-Signature", "X-Scion-Signed-Headers"},
 		CORSMaxAge:         3600,
 	}
 }
@@ -100,6 +118,11 @@ type Server struct {
 	hubClient hubclient.Client
 	cache     *templatecache.Cache
 	hydrator  *templatecache.Hydrator
+
+	// Authentication and heartbeat
+	hostAuthMiddleware *HostAuthMiddleware
+	heartbeat          *HeartbeatService
+	hostCredentials    *hostcredentials.HostCredentials
 }
 
 // New creates a new Runtime Host API server.
@@ -150,13 +173,36 @@ func (s *Server) initHubIntegration() error {
 	}
 	s.cache = cache
 
-	// Initialize Hub client
+	// Try to load host credentials for HMAC auth
+	var secretKey []byte
+	if err := s.loadHostCredentials(); err == nil && s.hostCredentials != nil {
+		// Decode the secret key
+		secretKey, err = base64.StdEncoding.DecodeString(s.hostCredentials.SecretKey)
+		if err != nil {
+			log.Printf("Warning: failed to decode host secret key: %v", err)
+		}
+	}
+
+	// Initialize Hub client with appropriate auth
 	opts := []hubclient.Option{}
-	if s.config.HubToken != "" {
+
+	if len(secretKey) > 0 && s.hostCredentials != nil {
+		// Use HMAC auth from credentials
+		opts = append(opts, hubclient.WithHMACAuth(s.hostCredentials.HostID, secretKey))
+		log.Printf("Hub client using HMAC authentication (hostID: %s)", s.hostCredentials.HostID)
+
+		// Update HostID from credentials if not already set
+		if s.config.HostID == "" {
+			s.config.HostID = s.hostCredentials.HostID
+		}
+	} else if s.config.HubToken != "" {
+		// Fall back to bearer token
 		opts = append(opts, hubclient.WithBearerToken(s.config.HubToken))
+		log.Printf("Hub client using bearer token authentication")
 	} else {
 		// Try auto dev auth
 		opts = append(opts, hubclient.WithAutoDevAuth())
+		log.Printf("Hub client using auto dev authentication")
 	}
 
 	client, err := hubclient.New(s.config.HubEndpoint, opts...)
@@ -168,9 +214,42 @@ func (s *Server) initHubIntegration() error {
 	// Initialize hydrator
 	s.hydrator = templatecache.NewHydrator(s.cache, s.hubClient)
 
+	// Set up host auth middleware if enabled and we have credentials
+	if s.config.HostAuthEnabled && len(secretKey) > 0 {
+		s.hostAuthMiddleware = NewHostAuthMiddleware(HostAuthConfig{
+			Enabled:              true,
+			MaxClockSkew:         5 * time.Minute,
+			SecretKey:            secretKey,
+			AllowUnauthenticated: true, // Allow mixed auth during transition
+		})
+		log.Printf("Host auth middleware enabled")
+	}
+
 	log.Printf("Hub integration initialized (endpoint: %s, cache: %s, max: %d MB)",
 		s.config.HubEndpoint, cacheDir, maxSize/(1024*1024))
 
+	return nil
+}
+
+// loadHostCredentials attempts to load host credentials from the configured path.
+func (s *Server) loadHostCredentials() error {
+	credPath := s.config.HostCredentialsPath
+	if credPath == "" {
+		credPath = hostcredentials.DefaultPath()
+	}
+
+	store := hostcredentials.NewStore(credPath)
+	if !store.Exists() {
+		return nil // No credentials file, not an error
+	}
+
+	creds, err := store.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load host credentials: %w", err)
+	}
+
+	s.hostCredentials = creds
+	log.Printf("Host credentials loaded (hostID: %s, hub: %s)", creds.HostID, creds.HubEndpoint)
 	return nil
 }
 
@@ -214,6 +293,24 @@ func (s *Server) Start(ctx context.Context) error {
 
 	log.Printf("Runtime Host API server starting on %s:%d (mode: %s)", s.config.Host, s.config.Port, s.config.Mode)
 
+	// Start heartbeat service if enabled and we have a Hub client
+	if s.config.HeartbeatEnabled && s.hubClient != nil && s.config.HostID != "" {
+		interval := s.config.HeartbeatInterval
+		if interval <= 0 {
+			interval = DefaultHeartbeatInterval
+		}
+
+		s.heartbeat = NewHeartbeatService(
+			s.hubClient.RuntimeHosts(),
+			s.config.HostID,
+			interval,
+			s.manager,
+		)
+		s.heartbeat.SetVersion(s.version)
+		s.heartbeat.Start(ctx)
+		log.Printf("Heartbeat service started (interval: %s)", interval)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -234,7 +331,14 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.RLock()
 	srv := s.httpServer
+	hb := s.heartbeat
 	s.mu.RUnlock()
+
+	// Stop heartbeat service first
+	if hb != nil {
+		log.Println("Stopping heartbeat service...")
+		hb.Stop()
+	}
 
 	if srv == nil {
 		return nil
@@ -275,6 +379,10 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 	h = s.loggingMiddleware(h)
 	if s.config.CORSEnabled {
 		h = s.corsMiddleware(h)
+	}
+	// Apply host auth middleware if configured
+	if s.hostAuthMiddleware != nil {
+		h = s.hostAuthMiddleware.Middleware(h)
 	}
 	return h
 }
