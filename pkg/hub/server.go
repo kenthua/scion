@@ -59,6 +59,9 @@ type ServerConfig struct {
 	// AuthorizedDomains is a list of email domains allowed to authenticate.
 	// If empty, all domains are allowed.
 	AuthorizedDomains []string
+	// AdminEmails is a list of email addresses that should be auto-promoted to admin role.
+	// Useful for bootstrapping the first admin user.
+	AdminEmails []string
 	// HostAuthConfig holds configuration for Runtime Host HMAC authentication.
 	HostAuthConfig HostAuthConfig
 	// HubEndpoint is the public endpoint URL for this Hub (used in host join responses).

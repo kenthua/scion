@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -49,6 +50,9 @@ var (
 
 	// Testing flag to simulate remote host behavior when running co-located
 	simulateRemoteHost bool
+
+	// Admin emails for bootstrapping - comma-separated list
+	adminEmails string
 )
 
 // serverCmd represents the server command
@@ -286,6 +290,18 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 	// Start Hub API if enabled
 	if enableHub {
+		// Parse admin emails from flag or config
+		var adminEmailList []string
+		if adminEmails != "" {
+			for _, email := range strings.Split(adminEmails, ",") {
+				email = strings.TrimSpace(email)
+				if email != "" {
+					adminEmailList = append(adminEmailList, email)
+				}
+			}
+			log.Printf("Admin emails configured: %v", adminEmailList)
+		}
+
 		// Create Hub server configuration
 		hubCfg := hub.ServerConfig{
 			Port:               cfg.Hub.Port,
@@ -300,6 +316,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			DevAuthToken:       devAuthToken,
 			Debug:              enableDebug,
 			AuthorizedDomains:  cfg.Auth.AuthorizedDomains,
+			AdminEmails:        adminEmailList,
 			HubEndpoint:        cfg.Hub.Endpoint,
 			HostAuthConfig:     hub.DefaultHostAuthConfig(), // Enable host HMAC authentication
 			OAuthConfig: hub.OAuthConfig{
@@ -850,4 +867,7 @@ func init() {
 
 	// Testing flags
 	serverStartCmd.Flags().BoolVar(&simulateRemoteHost, "simulate-remote-host", false, "Skip co-located optimizations to test full remote host code path")
+
+	// Admin bootstrap flags
+	serverStartCmd.Flags().StringVar(&adminEmails, "admin-emails", "", "Comma-separated list of email addresses to auto-promote to admin role")
 }

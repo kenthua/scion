@@ -201,7 +201,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 			Email:       req.Email,
 			DisplayName: req.Name,
 			AvatarURL:   req.Avatar,
-			Role:        "member",
+			Role:        s.getUserRole(req.Email),
 			Status:      "active",
 			Created:     time.Now(),
 			LastLogin:   time.Now(),
@@ -218,6 +218,10 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Name != "" && user.DisplayName == "" {
 			user.DisplayName = req.Name
+		}
+		// Check if user should be promoted to admin (in case admin list changed)
+		if user.Role != "admin" && s.getUserRole(req.Email) == "admin" {
+			user.Role = "admin"
 		}
 		_ = s.store.UpdateUser(ctx, user)
 	}
@@ -323,7 +327,7 @@ func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 			Email:       userInfo.Email,
 			DisplayName: userInfo.DisplayName,
 			AvatarURL:   userInfo.AvatarURL,
-			Role:        "member",
+			Role:        s.getUserRole(userInfo.Email),
 			Status:      "active",
 			Created:     time.Now(),
 			LastLogin:   time.Now(),
@@ -340,6 +344,10 @@ func (s *Server) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 		}
 		if userInfo.DisplayName != "" && user.DisplayName == "" {
 			user.DisplayName = userInfo.DisplayName
+		}
+		// Check if user should be promoted to admin (in case admin list changed)
+		if user.Role != "admin" && s.getUserRole(userInfo.Email) == "admin" {
+			user.Role = "admin"
 		}
 		_ = s.store.UpdateUser(ctx, user)
 	}
@@ -732,7 +740,7 @@ func (s *Server) handleCLIAuthToken(w http.ResponseWriter, r *http.Request) {
 			Email:       userInfo.Email,
 			DisplayName: userInfo.DisplayName,
 			AvatarURL:   userInfo.AvatarURL,
-			Role:        "member",
+			Role:        s.getUserRole(userInfo.Email),
 			Status:      "active",
 			Created:     time.Now(),
 			LastLogin:   time.Now(),
@@ -749,6 +757,10 @@ func (s *Server) handleCLIAuthToken(w http.ResponseWriter, r *http.Request) {
 		}
 		if userInfo.DisplayName != "" && user.DisplayName == "" {
 			user.DisplayName = userInfo.DisplayName
+		}
+		// Check if user should be promoted to admin (in case admin list changed)
+		if user.Role != "admin" && s.getUserRole(userInfo.Email) == "admin" {
+			user.Role = "admin"
 		}
 		_ = s.store.UpdateUser(ctx, user)
 	}
@@ -810,4 +822,21 @@ func isEmailAuthorized(email string, authorizedDomains []string) bool {
 	}
 
 	return false
+}
+
+// determineUserRole returns the role for a user based on their email.
+// Returns "admin" if the email is in the adminEmails list, otherwise "member".
+func determineUserRole(email string, adminEmails []string) string {
+	emailLower := strings.ToLower(email)
+	for _, adminEmail := range adminEmails {
+		if strings.ToLower(adminEmail) == emailLower {
+			return "admin"
+		}
+	}
+	return "member"
+}
+
+// (s *Server) getUserRole is a convenience method to determine role using server config.
+func (s *Server) getUserRole(email string) string {
+	return determineUserRole(email, s.config.AdminEmails)
 }
