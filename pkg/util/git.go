@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // IsGitRepo returns true if the current working directory is inside a git repository.
@@ -200,18 +201,27 @@ func RemoveWorktree(path string, deleteBranch bool) (bool, error) {
 		}
 	}
 
-	// Remove the worktree. 
+	// Remove the worktree.
 	// We run this from the system root or anywhere to ensure we're not "in" the dir
+	Debugf("RemoveWorktree: running git worktree remove for %s", path)
+	worktreeRemoveStart := time.Now()
 	cmd := exec.Command("git", "worktree", "remove", path, "--force")
 	if err := cmd.Run(); err != nil {
+		Debugf("RemoveWorktree: git worktree remove failed in %v: %v", time.Since(worktreeRemoveStart), err)
 		return false, err
 	}
+	Debugf("RemoveWorktree: git worktree remove completed in %v", time.Since(worktreeRemoveStart))
 
 	if deleteBranch && branchName != "" && repoRoot != "" {
 		// Now delete the branch from the main repo
+		Debugf("RemoveWorktree: deleting branch %s", branchName)
+		branchDeleteStart := time.Now()
 		cmd := exec.Command("git", "-C", repoRoot, "branch", "-D", branchName)
 		if err := cmd.Run(); err == nil {
 			branchDeleted = true
+			Debugf("RemoveWorktree: branch delete completed in %v", time.Since(branchDeleteStart))
+		} else {
+			Debugf("RemoveWorktree: branch delete failed in %v: %v", time.Since(branchDeleteStart), err)
 		}
 	}
 	return branchDeleted, nil

@@ -54,13 +54,18 @@ func CopyFile(src, dst string) error {
 
 // MakeWritableRecursive recursively makes all files and directories in the path writable by the user.
 func MakeWritableRecursive(path string) error {
-	return filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+	var totalFiles, chmodCount int
+	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+		totalFiles++
 		if info.Mode().Perm()&0200 == 0 {
+			chmodCount++
 			return os.Chmod(path, info.Mode().Perm()|0200)
 		}
 		return nil
 	})
+	Debugf("MakeWritableRecursive: walked %d files, chmod'd %d", totalFiles, chmodCount)
+	return err
 }

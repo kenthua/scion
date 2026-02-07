@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
@@ -34,17 +35,30 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 		agentWorkspace := filepath.Join(agentDir, "workspace")
 		// Check if it's a worktree before trying to remove it
 		if _, err := os.Stat(filepath.Join(agentWorkspace, ".git")); err == nil {
+			util.Debugf("delete: removing git worktree at %s", agentWorkspace)
+			worktreeStart := time.Now()
 			if deleted, err := util.RemoveWorktree(agentWorkspace, removeBranch); err == nil {
 				if deleted {
 					branchDeleted = true
 				}
+				util.Debugf("delete: worktree removal completed in %v (branch deleted: %v)", time.Since(worktreeStart), deleted)
+			} else {
+				util.Debugf("delete: worktree removal failed in %v: %v", time.Since(worktreeStart), err)
 			}
 		}
 
+		util.Debugf("delete: making directory writable: %s", agentDir)
+		chmodStart := time.Now()
 		_ = util.MakeWritableRecursive(agentDir)
+		util.Debugf("delete: chmod completed in %v", time.Since(chmodStart))
+
+		util.Debugf("delete: removing directory: %s", agentDir)
+		removeStart := time.Now()
 		if err := os.RemoveAll(agentDir); err != nil {
+			util.Debugf("delete: RemoveAll failed in %v: %v", time.Since(removeStart), err)
 			return branchDeleted, fmt.Errorf("failed to remove agent directory: %w", err)
 		}
+		util.Debugf("delete: RemoveAll completed in %v", time.Since(removeStart))
 	}
 	return branchDeleted, nil
 }
