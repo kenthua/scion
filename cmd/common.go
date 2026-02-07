@@ -417,37 +417,57 @@ func createAgentWithBrokerResolution(ctx context.Context, hubCtx *HubContext, gr
 			return nil, err
 		}
 
-		fmt.Printf("\nMultiple runtime brokers available for grove:\n")
-		for i, h := range availableBrokers {
-			brokerMap, _ := h.(map[string]interface{})
+		reader := bufio.NewReader(os.Stdin)
+
+		if len(availableBrokers) == 1 {
+			// Single broker available - simple confirmation
+			brokerMap, _ := availableBrokers[0].(map[string]interface{})
 			name, _ := brokerMap["name"].(string)
 			status, _ := brokerMap["status"].(string)
-			fmt.Printf("  [%d] %s (%s)\n", i+1, name, status)
-		}
-		fmt.Println()
 
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			fmt.Print("Select a broker (or 'c' to cancel): ")
+			fmt.Printf("\nUse runtime broker %s (%s)? [y/N]: ", name, status)
 			input, err := reader.ReadString('\n')
 			if err != nil {
 				return nil, fmt.Errorf("failed to read input: %w", err)
 			}
-
 			input = strings.TrimSpace(strings.ToLower(input))
-			if input == "c" || input == "cancel" {
+			if input != "y" && input != "yes" {
 				return nil, fmt.Errorf("operation cancelled")
 			}
-
-			var choice int
-			if _, err := fmt.Sscanf(input, "%d", &choice); err != nil || choice < 1 || choice > len(availableBrokers) {
-				fmt.Printf("Invalid choice. Please enter 1-%d.\n", len(availableBrokers))
-				continue
+			req.RuntimeBrokerID, _ = brokerMap["id"].(string)
+		} else {
+			// Multiple brokers - selection prompt
+			fmt.Printf("\nMultiple runtime brokers available for grove:\n")
+			for i, h := range availableBrokers {
+				brokerMap, _ := h.(map[string]interface{})
+				name, _ := brokerMap["name"].(string)
+				status, _ := brokerMap["status"].(string)
+				fmt.Printf("  [%d] %s (%s)\n", i+1, name, status)
 			}
+			fmt.Println()
 
-			selectedBroker, _ := availableBrokers[choice-1].(map[string]interface{})
-			req.RuntimeBrokerID, _ = selectedBroker["id"].(string)
-			break
+			for {
+				fmt.Print("Select a broker (or 'c' to cancel): ")
+				input, err := reader.ReadString('\n')
+				if err != nil {
+					return nil, fmt.Errorf("failed to read input: %w", err)
+				}
+
+				input = strings.TrimSpace(strings.ToLower(input))
+				if input == "c" || input == "cancel" {
+					return nil, fmt.Errorf("operation cancelled")
+				}
+
+				var choice int
+				if _, err := fmt.Sscanf(input, "%d", &choice); err != nil || choice < 1 || choice > len(availableBrokers) {
+					fmt.Printf("Invalid choice. Please enter 1-%d.\n", len(availableBrokers))
+					continue
+				}
+
+				selectedBroker, _ := availableBrokers[choice-1].(map[string]interface{})
+				req.RuntimeBrokerID, _ = selectedBroker["id"].(string)
+				break
+			}
 		}
 		// Loop and retry with selected broker
 	}
