@@ -888,6 +888,12 @@ func (s *Server) createGrove(w http.ResponseWriter, r *http.Request) {
 		grove.Visibility = store.VisibilityPrivate
 	}
 
+	// Set ownership from authenticated user
+	if user := GetUserIdentityFromContext(ctx); user != nil {
+		grove.CreatedBy = user.ID()
+		grove.OwnerID = user.ID()
+	}
+
 	if err := s.store.CreateGrove(ctx, grove); err != nil {
 		writeErrorFromErr(w, err, "")
 		return
@@ -972,6 +978,12 @@ func (s *Server) handleGroveRegister(w http.ResponseWriter, r *http.Request) {
 			GitRemote:  normalizedRemote,
 			Labels:     req.Labels,
 			Visibility: store.VisibilityPrivate,
+		}
+
+		// Set ownership from authenticated user
+		if user := GetUserIdentityFromContext(ctx); user != nil {
+			grove.CreatedBy = user.ID()
+			grove.OwnerID = user.ID()
 		}
 
 		if err := s.store.CreateGrove(ctx, grove); err != nil {

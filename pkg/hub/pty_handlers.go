@@ -79,7 +79,24 @@ func (s *Server) handleAgentPTY(w http.ResponseWriter, r *http.Request) {
 	if user != nil {
 		// Verify user has access to the agent's grove
 		grove, err := s.store.GetGrove(ctx, agent.GroveID)
-		if err != nil || grove.OwnerID != user.ID() {
+		if err != nil {
+			slog.Warn("PTY access denied: failed to get grove",
+				"agentID", agentID,
+				"groveID", agent.GroveID,
+				"userID", user.ID(),
+				"error", err)
+			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
+			return
+		}
+		// Allow access if:
+		// 1. Grove has no owner (backward compatibility for groves created before ownership tracking)
+		// 2. User is the grove owner
+		if grove.OwnerID != "" && grove.OwnerID != user.ID() {
+			slog.Warn("PTY access denied: user is not grove owner",
+				"agentID", agentID,
+				"groveID", agent.GroveID,
+				"groveOwnerID", grove.OwnerID,
+				"userID", user.ID())
 			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
 			return
 		}
