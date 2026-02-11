@@ -389,6 +389,11 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 		GrovePath:   grovePath,
 	}
 
+	// Pass workspace storage path for GCS bootstrap (non-git workspaces)
+	if agent.AppliedConfig != nil && agent.AppliedConfig.WorkspaceStoragePath != "" {
+		req.WorkspaceStoragePath = agent.AppliedConfig.WorkspaceStoragePath
+	}
+
 	if d.debug {
 		slog.Debug("DispatchAgentCreate",
 			"agentName", agent.Name,

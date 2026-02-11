@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/credentials"
 	"github.com/ptone/scion-agent/pkg/hubclient"
 	"github.com/ptone/scion-agent/pkg/hubsync"
+	"github.com/ptone/scion-agent/pkg/transfer"
 	"github.com/ptone/scion-agent/pkg/util"
 	"github.com/ptone/scion-agent/pkg/wsclient"
 	"github.com/spf13/cobra"
@@ -375,6 +377,23 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		}
 	}
 
+	// Detect non-git grove for workspace bootstrap
+	var workspaceFiles []transfer.FileInfo
+	if hubCtx.GrovePath != "" && task != "" {
+		groveDir := filepath.Dir(hubCtx.GrovePath) // parent of .scion
+		if !util.IsGitRepoDir(groveDir) {
+			files, err := transfer.CollectFiles(groveDir, transfer.DefaultExcludePatterns)
+			if err != nil {
+				return fmt.Errorf("failed to collect workspace files: %w", err)
+			}
+			if len(files) > 0 {
+				req.WorkspaceFiles = files
+				workspaceFiles = files
+				fmt.Printf("Uploading workspace (%d files)...\n", len(files))
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -387,6 +406,72 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 	resp, err := createAgentWithBrokerResolution(ctx, hubCtx, groveID, req)
 	if err != nil {
 		return wrapHubError(fmt.Errorf("failed to start agent via Hub: %w", err))
+	}
+
+	// Workspace bootstrap: upload files and finalize
+	if len(resp.UploadURLs) > 0 && len(workspaceFiles) > 0 {
+		tc := transfer.NewClient(nil)
+		uploadErr := tc.UploadFiles(ctx, workspaceFiles, resp.UploadURLs, func(file transfer.FileInfo, bytesTransferred int64) error {
+			if bytesTransferred == file.Size {
+				fmt.Printf("  Uploaded: %s\n", file.Path)
+			}
+			return nil
+		})
+		if uploadErr != nil {
+			return fmt.Errorf("failed to upload workspace files: %w", uploadErr)
+		}
+
+		// Finalize: triggers broker dispatch
+		manifest := transfer.BuildManifest(workspaceFiles)
+		agentSlug := agentName
+		if resp.Agent != nil && resp.Agent.Slug != "" {
+			agentSlug = resp.Agent.Slug
+		}
+
+		finalizeResp, err := hubCtx.Client.Workspace().FinalizeSyncTo(ctx, agentSlug, manifest)
+		if err != nil {
+			return fmt.Errorf("failed to finalize workspace bootstrap: %w", err)
+		}
+		fmt.Printf("Workspace uploaded: %d files\n", finalizeResp.FilesApplied)
+
+		// Poll until agent is running
+		fmt.Printf("Waiting for agent '%s' to start...\n", agentName)
+		pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer pollCancel()
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-pollCtx.Done():
+				return fmt.Errorf("timed out waiting for agent '%s' to start", agentName)
+			case <-ticker.C:
+				agent, err := hubCtx.Client.GroveAgents(groveID).Get(pollCtx, agentName)
+				if err != nil {
+					continue
+				}
+				if agent.Status == "running" {
+					fmt.Printf("Agent '%s' started via Hub.\n", agentName)
+					if !attach {
+						return nil
+					}
+					// Fall through to attach logic below
+					agentID := agent.ID
+					if agentID == "" {
+						agentID = agentName
+					}
+					token := credentials.GetAccessToken(hubCtx.Endpoint)
+					if token == "" {
+						return fmt.Errorf("no access token found for Hub\n\nPlease login first: scion hub auth login")
+					}
+					fmt.Printf("Attaching to agent '%s' via Hub...\n", agentName)
+					return wsclient.AttachToAgent(context.Background(), hubCtx.Endpoint, token, agentID)
+				}
+				if agent.Status == "error" || agent.Status == "stopped" {
+					return fmt.Errorf("agent '%s' failed to start (status: %s)", agentName, agent.Status)
+				}
+			}
+		}
 	}
 
 	displayStatus := "started"

@@ -184,6 +184,9 @@ type RemoteCreateAgentRequest struct {
 	// GrovePath is the local filesystem path to the grove on the target runtime broker.
 	// This is looked up from the grove provider record for the target broker.
 	GrovePath string `json:"grovePath,omitempty"`
+	// WorkspaceStoragePath is the GCS storage path for bootstrapped workspaces.
+	// When set, the broker downloads the workspace from GCS instead of using GrovePath.
+	WorkspaceStoragePath string `json:"workspaceStoragePath,omitempty"`
 }
 
 // RemoteAgentConfig contains agent configuration for remote creation.

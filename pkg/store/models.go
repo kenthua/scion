@@ -88,6 +88,10 @@ type AgentAppliedConfig struct {
 
 	// Hub access scopes granted to the agent (from template HubAccess config)
 	HubAccessScopes []string `json:"hubAccessScopes,omitempty"`
+
+	// WorkspaceStoragePath is the GCS storage path for bootstrapped workspaces.
+	// Set during workspace bootstrap for non-git groves.
+	WorkspaceStoragePath string `json:"workspaceStoragePath,omitempty"`
 }
 
 // AgentStatus constants

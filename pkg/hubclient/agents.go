@@ -18,8 +18,10 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/ptone/scion-agent/pkg/apiclient"
+	"github.com/ptone/scion-agent/pkg/transfer"
 )
 
 // AgentService handles agent operations.
@@ -106,12 +108,18 @@ type CreateAgentRequest struct {
 	Annotations   map[string]string `json:"annotations,omitempty"`
 	Config        *AgentConfig      `json:"config,omitempty"`
 	Resume        bool              `json:"resume,omitempty"`
+	// WorkspaceFiles is populated for non-git workspace bootstrap.
+	WorkspaceFiles []transfer.FileInfo `json:"workspaceFiles,omitempty"`
 }
 
 // CreateAgentResponse is the response from creating an agent.
 type CreateAgentResponse struct {
 	Agent    *Agent   `json:"agent"`
 	Warnings []string `json:"warnings,omitempty"`
+	// UploadURLs is populated during workspace bootstrap (non-git groves).
+	UploadURLs []transfer.UploadURLInfo `json:"uploadUrls,omitempty"`
+	// Expires indicates when the upload URLs expire.
+	Expires *time.Time `json:"expires,omitempty"`
 }
 
 // UpdateAgentRequest is the request body for updating an agent.

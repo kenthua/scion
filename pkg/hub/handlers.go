@@ -24,7 +24,9 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
+	"github.com/ptone/scion-agent/pkg/storage"
 	"github.com/ptone/scion-agent/pkg/store"
+	"github.com/ptone/scion-agent/pkg/transfer"
 	"github.com/ptone/scion-agent/pkg/util"
 )
 
@@ -152,6 +154,9 @@ type CreateAgentRequest struct {
 	Workspace     string            `json:"workspace,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
 	Config        *AgentConfigOverride `json:"config,omitempty"`
+	// WorkspaceFiles is populated for non-git workspace bootstrap.
+	// When present, the Hub generates signed upload URLs instead of dispatching immediately.
+	WorkspaceFiles []transfer.FileInfo `json:"workspaceFiles,omitempty"`
 }
 
 type AgentConfigOverride struct {
@@ -164,6 +169,11 @@ type AgentConfigOverride struct {
 type CreateAgentResponse struct {
 	Agent    *store.Agent `json:"agent"`
 	Warnings []string     `json:"warnings,omitempty"`
+	// UploadURLs is populated during workspace bootstrap (non-git groves).
+	// The CLI uploads files to these URLs, then calls finalize to trigger dispatch.
+	UploadURLs []transfer.UploadURLInfo `json:"uploadUrls,omitempty"`
+	// Expires indicates when the upload URLs expire.
+	Expires *time.Time `json:"expires,omitempty"`
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
@@ -391,6 +401,46 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.store.CreateAgent(ctx, agent); err != nil {
 		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	// Workspace bootstrap mode: if WorkspaceFiles are provided with a task,
+	// generate signed upload URLs instead of dispatching immediately.
+	// The CLI will upload files, then call finalize to trigger dispatch.
+	if len(req.WorkspaceFiles) > 0 && req.Task != "" {
+		stor := s.GetStorage()
+		if stor == nil {
+			RuntimeError(w, "Storage not configured for workspace bootstrap")
+			return
+		}
+
+		storagePath := storage.WorkspaceStoragePath(agent.GroveID, agent.ID)
+		uploadURLs, existingFiles, err := generateWorkspaceUploadURLs(ctx, stor, storagePath, req.WorkspaceFiles)
+		if err != nil {
+			RuntimeError(w, "Failed to generate upload URLs: "+err.Error())
+			return
+		}
+
+		// Set agent to provisioning status (not dispatched yet)
+		agent.Status = store.AgentStatusProvisioning
+		if err := s.store.UpdateAgent(ctx, agent); err != nil {
+			slog.Warn("Failed to update agent status to provisioning", "error", err)
+		}
+
+		expires := time.Now().Add(SignedURLExpiry)
+		s.enrichAgent(ctx, agent, grove, nil)
+
+		var warnings []string
+		if len(existingFiles) > 0 {
+			slog.Debug("Workspace bootstrap: files already in storage", "count", len(existingFiles))
+		}
+
+		writeJSON(w, http.StatusCreated, CreateAgentResponse{
+			Agent:      agent,
+			Warnings:   warnings,
+			UploadURLs: uploadURLs,
+			Expires:    &expires,
+		})
 		return
 	}
 

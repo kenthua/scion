@@ -17,12 +17,14 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/ptone/scion-agent/pkg/storage"
+	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/transfer"
 	"github.com/ptone/scion-agent/pkg/wsprotocol"
 )
@@ -386,9 +388,9 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Check agent is running for apply
-	if agent.Status != "running" {
-		Conflict(w, "Agent is not running")
+	// Check agent is in a valid state for finalize
+	if agent.Status != "running" && agent.Status != "provisioning" {
+		Conflict(w, "Agent must be running or provisioning")
 		return
 	}
 
@@ -419,7 +421,50 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 	// Compute content hash from file hashes
 	contentHash := transfer.ComputeContentHash(req.Manifest.Files)
 
-	// Tunnel request to Runtime Broker to apply workspace
+	// Calculate total bytes transferred
+	var totalBytes int64
+	for _, file := range req.Manifest.Files {
+		totalBytes += file.Size
+	}
+
+	// Bootstrap mode: agent is provisioning, dispatch to broker now
+	if agent.Status == "provisioning" {
+		// Store workspace storage path on agent record for broker download
+		if agent.AppliedConfig == nil {
+			agent.AppliedConfig = &store.AgentAppliedConfig{}
+		}
+		agent.AppliedConfig.WorkspaceStoragePath = storagePath
+		if err := s.store.UpdateAgent(ctx, agent); err != nil {
+			RuntimeError(w, "Failed to update agent config: "+err.Error())
+			return
+		}
+
+		// Dispatch to broker (creates and starts the agent)
+		dispatcher := s.GetDispatcher()
+		if dispatcher == nil {
+			RuntimeError(w, "No dispatcher available")
+			return
+		}
+		if err := dispatcher.DispatchAgentCreate(ctx, agent); err != nil {
+			RuntimeError(w, "Failed to dispatch agent: "+err.Error())
+			return
+		}
+
+		// Update agent status from broker response
+		if err := s.store.UpdateAgent(ctx, agent); err != nil {
+			slog.Warn("Failed to update agent status after dispatch", "error", err)
+		}
+
+		writeJSON(w, http.StatusOK, SyncToFinalizeResponse{
+			Applied:          true,
+			ContentHash:      contentHash,
+			FilesApplied:     len(req.Manifest.Files),
+			BytesTransferred: totalBytes,
+		})
+		return
+	}
+
+	// Normal mode: agent is running, tunnel apply to running container via control channel
 	cc := s.GetControlChannelManager()
 	if cc == nil {
 		RuntimeError(w, "Control channel not available")
@@ -442,18 +487,54 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Calculate total bytes transferred
-	var totalBytes int64
-	for _, file := range req.Manifest.Files {
-		totalBytes += file.Size
-	}
-
 	writeJSON(w, http.StatusOK, SyncToFinalizeResponse{
 		Applied:          true,
 		ContentHash:      contentHash,
 		FilesApplied:     len(req.Manifest.Files),
 		BytesTransferred: totalBytes,
 	})
+}
+
+// generateWorkspaceUploadURLs generates signed upload URLs for workspace files.
+// It checks for existing files with matching hashes and only generates URLs for new/changed files.
+// Returns upload URLs, list of existing (unchanged) files, and any error.
+func generateWorkspaceUploadURLs(ctx context.Context, stor storage.Storage, storagePath string, files []transfer.FileInfo) ([]transfer.UploadURLInfo, []string, error) {
+	expires := time.Now().Add(SignedURLExpiry)
+	uploadURLs := make([]transfer.UploadURLInfo, 0, len(files))
+	existingFiles := make([]string, 0)
+
+	for _, file := range files {
+		objectPath := storagePath + "/files/" + file.Path
+
+		// Check if file already exists with matching hash (incremental sync)
+		obj, err := stor.GetObject(ctx, objectPath)
+		if err == nil && obj != nil {
+			if storedHash, ok := obj.Metadata["sha256"]; ok && storedHash == file.Hash {
+				existingFiles = append(existingFiles, file.Path)
+				continue
+			}
+		}
+
+		// File doesn't exist or hash doesn't match - generate upload URL
+		signedURL, err := stor.GenerateSignedURL(ctx, objectPath, storage.SignedURLOptions{
+			Method:      "PUT",
+			Expires:     SignedURLExpiry,
+			ContentType: "application/octet-stream",
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
+		uploadURLs = append(uploadURLs, transfer.UploadURLInfo{
+			Path:    file.Path,
+			URL:     signedURL.URL,
+			Method:  "PUT",
+			Headers: signedURL.Headers,
+			Expires: expires,
+		})
+	}
+
+	return uploadURLs, existingFiles, nil
 }
 
 // Runtime Broker request/response types for control channel tunneling

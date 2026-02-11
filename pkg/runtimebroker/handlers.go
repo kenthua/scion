@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
+	"github.com/ptone/scion-agent/pkg/gcp"
 	"github.com/ptone/scion-agent/pkg/templatecache"
 )
 
@@ -326,6 +327,37 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Always set env (may be empty, which is fine)
 	opts.Env = env
+
+	// If WorkspaceStoragePath is set, download workspace from GCS (non-git bootstrap)
+	if req.WorkspaceStoragePath != "" {
+		workspaceDir := filepath.Join(s.config.WorktreeBase, req.Name, "workspace")
+		if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+			RuntimeError(w, "Failed to create workspace directory: "+err.Error())
+			return
+		}
+
+		bucket := s.config.StorageBucket
+		if bucket == "" {
+			RuntimeError(w, "Storage bucket not configured for workspace bootstrap")
+			return
+		}
+
+		if s.config.Debug {
+			slog.Debug("Downloading workspace from GCS",
+				"bucket", bucket,
+				"storagePath", req.WorkspaceStoragePath+"/files",
+				"workspaceDir", workspaceDir,
+			)
+		}
+
+		if err := gcp.SyncFromGCS(ctx, bucket, req.WorkspaceStoragePath+"/files", workspaceDir); err != nil {
+			RuntimeError(w, "Failed to download workspace from GCS: "+err.Error())
+			return
+		}
+
+		opts.Workspace = workspaceDir
+		opts.GrovePath = "" // Prevent git worktree logic in ProvisionAgent
+	}
 
 	// Start the agent
 	agentInfo, err := s.manager.Start(ctx, opts)

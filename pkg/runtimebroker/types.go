@@ -156,6 +156,9 @@ type CreateAgentRequest struct {
 	// GrovePath is the local filesystem path to the grove on this runtime broker.
 	// This is provided by the Hub from the grove provider record.
 	GrovePath string `json:"grovePath,omitempty"`
+	// WorkspaceStoragePath is the GCS storage path for bootstrapped workspaces.
+	// When set, the broker downloads the workspace from GCS instead of using GrovePath.
+	WorkspaceStoragePath string `json:"workspaceStoragePath,omitempty"`
 }
 
 // CreateAgentConfig contains configuration for agent creation.
