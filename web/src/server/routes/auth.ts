@@ -297,7 +297,7 @@ export function createAuthRouter(config: AppConfig): Router {
       });
 
       // Check if user's email domain is authorized (secondary check, Hub might already do this)
-      if (!isEmailAuthorized(user.email, config.auth.authorizedDomains)) {
+      if (!isEmailAuthorized(user.email, config.auth.authorizedDomains, config.auth.adminEmails)) {
         authRoutesDebug(`User email domain not authorized`, { email: user.email });
         ctx.redirect(`/unauthorized?email=${encodeURIComponent(user.email)}`);
         return;

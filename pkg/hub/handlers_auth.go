@@ -196,7 +196,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if user's email domain is authorized
-	if !isEmailAuthorized(req.Email, s.config.AuthorizedDomains) {
+	if !isEmailAuthorized(req.Email, s.config.AuthorizedDomains, s.config.AdminEmails) {
 		writeError(w, http.StatusForbidden, "unauthorized_domain",
 			"your email domain is not authorized", nil)
 		return
@@ -739,7 +739,7 @@ func (s *Server) handleCLIAuthToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if user's email domain is authorized
-	if !isEmailAuthorized(userInfo.Email, s.config.AuthorizedDomains) {
+	if !isEmailAuthorized(userInfo.Email, s.config.AuthorizedDomains, s.config.AdminEmails) {
 		writeError(w, http.StatusForbidden, "unauthorized_domain",
 			"your email domain is not authorized", nil)
 		return
@@ -814,10 +814,19 @@ func generateID() string {
 
 // isEmailAuthorized checks if an email address is from an authorized domain.
 // If authorizedDomains is empty, all emails are allowed.
-func isEmailAuthorized(email string, authorizedDomains []string) bool {
+// Bootstrap admin emails (from AdminEmails config) bypass the domain check.
+func isEmailAuthorized(email string, authorizedDomains []string, adminEmails []string) bool {
 	// If no domains are configured, allow all
 	if len(authorizedDomains) == 0 {
 		return true
+	}
+
+	// Bootstrap admin emails bypass domain restrictions
+	emailLower := strings.ToLower(email)
+	for _, admin := range adminEmails {
+		if strings.ToLower(admin) == emailLower {
+			return true
+		}
 	}
 
 	// Extract domain from email

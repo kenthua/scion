@@ -210,11 +210,18 @@ export function createAuthMiddleware(config: AppConfig) {
  *
  * @param email - User email address
  * @param authorizedDomains - List of authorized email domains
+ * @param adminEmails - Bootstrap admin emails that bypass domain restrictions
  * @returns true if authorized, false otherwise
  */
-export function isEmailAuthorized(email: string, authorizedDomains: string[]): boolean {
+export function isEmailAuthorized(email: string, authorizedDomains: string[], adminEmails: string[] = []): boolean {
   // If no domains are configured, allow all
   if (!authorizedDomains || authorizedDomains.length === 0) {
+    return true;
+  }
+
+  // Bootstrap admin emails bypass domain restrictions
+  const emailLower = email.toLowerCase();
+  if (adminEmails.some((admin) => admin.toLowerCase() === emailLower)) {
     return true;
   }
 

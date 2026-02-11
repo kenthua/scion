@@ -431,6 +431,7 @@ func TestIsEmailAuthorized(t *testing.T) {
 		name              string
 		email             string
 		authorizedDomains []string
+		adminEmails       []string
 		expected          bool
 	}{
 		{
@@ -505,14 +506,42 @@ func TestIsEmailAuthorized(t *testing.T) {
 			authorizedDomains: []string{"sub.example.com"},
 			expected:          true,
 		},
+		{
+			name:              "admin email bypasses domain restriction",
+			email:             "admin@personal.dev",
+			authorizedDomains: []string{"example.com"},
+			adminEmails:       []string{"admin@personal.dev"},
+			expected:          true,
+		},
+		{
+			name:              "admin email bypass is case insensitive",
+			email:             "Admin@Personal.Dev",
+			authorizedDomains: []string{"example.com"},
+			adminEmails:       []string{"admin@personal.dev"},
+			expected:          true,
+		},
+		{
+			name:              "non-admin from unauthorized domain still rejected",
+			email:             "user@personal.dev",
+			authorizedDomains: []string{"example.com"},
+			adminEmails:       []string{"admin@personal.dev"},
+			expected:          false,
+		},
+		{
+			name:              "admin email with no domain restrictions",
+			email:             "admin@anywhere.com",
+			authorizedDomains: []string{},
+			adminEmails:       []string{"admin@anywhere.com"},
+			expected:          true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := isEmailAuthorized(tc.email, tc.authorizedDomains)
+			result := isEmailAuthorized(tc.email, tc.authorizedDomains, tc.adminEmails)
 			if result != tc.expected {
-				t.Errorf("isEmailAuthorized(%q, %v) = %v, expected %v",
-					tc.email, tc.authorizedDomains, result, tc.expected)
+				t.Errorf("isEmailAuthorized(%q, domains=%v, admins=%v) = %v, expected %v",
+					tc.email, tc.authorizedDomains, tc.adminEmails, result, tc.expected)
 			}
 		})
 	}

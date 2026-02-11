@@ -73,6 +73,8 @@ export interface AppConfig {
     githubClientSecret: string;
     /** Authorized email domains (empty = allow all) */
     authorizedDomains: string[];
+    /** Bootstrap admin emails that bypass domain restrictions */
+    adminEmails: string[];
   };
 }
 
@@ -153,6 +155,7 @@ export function loadConfig(): AppConfig {
       githubClientId: getEnvString('SCION_SERVER_OAUTH_WEB_GITHUB_CLIENTID', ''),
       githubClientSecret: getEnvString('SCION_SERVER_OAUTH_WEB_GITHUB_CLIENTSECRET', ''),
       authorizedDomains: getEnvStringArray('SCION_AUTHORIZED_DOMAINS', []),
+      adminEmails: getEnvStringArray('SCION_SERVER_HUB_ADMINEMAILS', []),
     },
   };
 }
