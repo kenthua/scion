@@ -16,11 +16,14 @@
 check_for_update_on_startup = false
 approval_policy = "never"
 
-model = "gpt-5.1-codex-mini"
+model = "gpt-5.2-codex"
 model_reasoning_effort = "medium"
+
+[notice.model_migrations]
+"gpt-5.1-codex-mini" = "gpt-5.2-codex"
 
 [projects."/workspace"]
 trust_level = "trusted"
 
-[projects."/repo-root/.scion/agents/foo/workspace"]
-trust_level = "trusted"
+
+
