@@ -21,22 +21,24 @@ import (
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
-// CompositeStore wraps an existing store.Store and overrides group operations
-// with an Ent-backed GroupStore implementation.
+// CompositeStore wraps an existing store.Store and overrides group and policy
+// operations with Ent-backed implementations.
 type CompositeStore struct {
 	store.Store
-	groups *GroupStore
-	client *ent.Client
+	groups   *GroupStore
+	policies *PolicyStore
+	client   *ent.Client
 }
 
-// NewCompositeStore creates a CompositeStore that delegates group operations to
-// the Ent-backed GroupStore while forwarding all other operations to the
+// NewCompositeStore creates a CompositeStore that delegates group and policy
+// operations to Ent-backed stores while forwarding all other operations to the
 // underlying store.
 func NewCompositeStore(base store.Store, client *ent.Client) *CompositeStore {
 	return &CompositeStore{
-		Store:  base,
-		groups: NewGroupStore(client),
-		client: client,
+		Store:    base,
+		groups:   NewGroupStore(client),
+		policies: NewPolicyStore(client),
+		client:   client,
 	}
 }
 
@@ -117,4 +119,46 @@ func (c *CompositeStore) CheckDelegatedAccess(ctx context.Context, agentID strin
 
 func (c *CompositeStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]store.Group, error) {
 	return c.groups.GetGroupsByIDs(ctx, ids)
+}
+
+// PolicyStore method overrides — delegate to Ent-backed PolicyStore.
+
+func (c *CompositeStore) CreatePolicy(ctx context.Context, policy *store.Policy) error {
+	return c.policies.CreatePolicy(ctx, policy)
+}
+
+func (c *CompositeStore) GetPolicy(ctx context.Context, id string) (*store.Policy, error) {
+	return c.policies.GetPolicy(ctx, id)
+}
+
+func (c *CompositeStore) UpdatePolicy(ctx context.Context, policy *store.Policy) error {
+	return c.policies.UpdatePolicy(ctx, policy)
+}
+
+func (c *CompositeStore) DeletePolicy(ctx context.Context, id string) error {
+	return c.policies.DeletePolicy(ctx, id)
+}
+
+func (c *CompositeStore) ListPolicies(ctx context.Context, filter store.PolicyFilter, opts store.ListOptions) (*store.ListResult[store.Policy], error) {
+	return c.policies.ListPolicies(ctx, filter, opts)
+}
+
+func (c *CompositeStore) AddPolicyBinding(ctx context.Context, binding *store.PolicyBinding) error {
+	return c.policies.AddPolicyBinding(ctx, binding)
+}
+
+func (c *CompositeStore) RemovePolicyBinding(ctx context.Context, policyID, principalType, principalID string) error {
+	return c.policies.RemovePolicyBinding(ctx, policyID, principalType, principalID)
+}
+
+func (c *CompositeStore) GetPolicyBindings(ctx context.Context, policyID string) ([]store.PolicyBinding, error) {
+	return c.policies.GetPolicyBindings(ctx, policyID)
+}
+
+func (c *CompositeStore) GetPoliciesForPrincipal(ctx context.Context, principalType, principalID string) ([]store.Policy, error) {
+	return c.policies.GetPoliciesForPrincipal(ctx, principalType, principalID)
+}
+
+func (c *CompositeStore) GetPoliciesForPrincipals(ctx context.Context, principals []store.PrincipalRef) ([]store.Policy, error) {
+	return c.policies.GetPoliciesForPrincipals(ctx, principals)
 }

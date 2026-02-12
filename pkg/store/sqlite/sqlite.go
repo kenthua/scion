@@ -3120,6 +3120,61 @@ func (s *SQLiteStore) GetPoliciesForPrincipal(ctx context.Context, principalType
 	return policies, nil
 }
 
+func (s *SQLiteStore) GetPoliciesForPrincipals(ctx context.Context, principals []store.PrincipalRef) ([]store.Policy, error) {
+	if len(principals) == 0 {
+		return nil, nil
+	}
+
+	// Build dynamic OR clauses for each principal
+	var clauses []string
+	var args []interface{}
+	for _, p := range principals {
+		clauses = append(clauses, "(pb.principal_type = ? AND pb.principal_id = ?)")
+		args = append(args, p.Type, p.ID)
+	}
+
+	query := `
+		SELECT DISTINCT p.id, p.name, p.description, p.scope_type, p.scope_id, p.resource_type, p.resource_id, p.actions, p.effect, p.conditions, p.priority, p.labels, p.annotations, p.created_at, p.updated_at, p.created_by
+		FROM policies p
+		INNER JOIN policy_bindings pb ON p.id = pb.policy_id
+		WHERE ` + strings.Join(clauses, " OR ") + `
+		ORDER BY
+			CASE p.scope_type WHEN 'hub' THEN 0 WHEN 'grove' THEN 1 WHEN 'resource' THEN 2 END,
+			p.priority ASC
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var policies []store.Policy
+	for rows.Next() {
+		var policy store.Policy
+		var actions, conditions, labels, annotations string
+
+		if err := rows.Scan(
+			&policy.ID, &policy.Name, &policy.Description, &policy.ScopeType, &policy.ScopeID,
+			&policy.ResourceType, &policy.ResourceID,
+			&actions, &policy.Effect, &conditions,
+			&policy.Priority, &labels, &annotations,
+			&policy.Created, &policy.Updated, &policy.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+
+		unmarshalJSON(actions, &policy.Actions)
+		unmarshalJSON(conditions, &policy.Conditions)
+		unmarshalJSON(labels, &policy.Labels)
+		unmarshalJSON(annotations, &policy.Annotations)
+
+		policies = append(policies, policy)
+	}
+
+	return policies, nil
+}
+
 // ============================================================================
 // API Key Operations
 // ============================================================================

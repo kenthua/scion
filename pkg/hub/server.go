@@ -262,6 +262,7 @@ type Server struct {
 	auditLogger       AuditLogger         // Audit logger for security events
 	metrics           MetricsRecorder     // Metrics recorder for broker auth
 	controlChannel    *ControlChannelManager // WebSocket control channel for runtime brokers
+	authzService      *AuthzService       // Authorization service for policy evaluation
 }
 
 // New creates a new Hub API server.
@@ -360,6 +361,9 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		}
 	})
 	slog.Info("Control channel manager initialized")
+
+	// Initialize authorization service
+	srv.authzService = NewAuthzService(s, slog.Default())
 
 	// Build unified auth configuration
 	srv.authConfig = AuthConfig{

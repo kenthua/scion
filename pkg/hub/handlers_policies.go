@@ -15,6 +15,7 @@
 package hub
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -71,8 +72,27 @@ type ListPolicyBindingsResponse struct {
 
 // AddPolicyBindingRequest is the request body for adding a binding to a policy.
 type AddPolicyBindingRequest struct {
-	PrincipalType string `json:"principalType"` // "user" or "group"
+	PrincipalType string `json:"principalType"` // "user", "group", or "agent"
 	PrincipalID   string `json:"principalId"`
+}
+
+// EvaluateRequest is the request body for the policy evaluation endpoint.
+type EvaluateRequest struct {
+	PrincipalType string `json:"principalType"` // "user" or "agent"
+	PrincipalID   string `json:"principalId"`
+	ResourceType  string `json:"resourceType"`
+	ResourceID    string `json:"resourceId,omitempty"`
+	Action        string `json:"action"`
+}
+
+// EvaluateResponse is the response from the policy evaluation endpoint.
+type EvaluateResponse struct {
+	Allowed         bool     `json:"allowed"`
+	Reason          string   `json:"reason"`
+	MatchedPolicy   string   `json:"matchedPolicy,omitempty"`
+	PolicyName      string   `json:"policyName,omitempty"`
+	Scope           string   `json:"scope,omitempty"`
+	EffectiveGroups []string `json:"effectiveGroups,omitempty"`
 }
 
 // handlePolicies handles GET and POST on /api/v1/policies
@@ -179,7 +199,11 @@ func (s *Server) createPolicy(w http.ResponseWriter, r *http.Request) {
 		Priority:     req.Priority,
 		Labels:       req.Labels,
 		Annotations:  req.Annotations,
-		// CreatedBy: TODO: Get from auth context
+	}
+
+	// Populate CreatedBy from auth context
+	if identity := GetIdentityFromContext(ctx); identity != nil {
+		policy.CreatedBy = identity.ID()
 	}
 
 	if err := s.store.CreatePolicy(ctx, policy); err != nil {
@@ -196,6 +220,12 @@ func (s *Server) handlePolicyRoutes(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/policies/")
 	if path == "" {
 		NotFound(w, "Policy")
+		return
+	}
+
+	// Check for evaluate endpoint before treating as policy ID
+	if path == "evaluate" {
+		s.handlePolicyEvaluate(w, r)
 		return
 	}
 
@@ -366,8 +396,8 @@ func (s *Server) addPolicyBinding(w http.ResponseWriter, r *http.Request, policy
 		ValidationError(w, "principalType is required", nil)
 		return
 	}
-	if req.PrincipalType != store.PolicyPrincipalTypeUser && req.PrincipalType != store.PolicyPrincipalTypeGroup {
-		ValidationError(w, "principalType must be 'user' or 'group'", nil)
+	if req.PrincipalType != store.PolicyPrincipalTypeUser && req.PrincipalType != store.PolicyPrincipalTypeGroup && req.PrincipalType != store.PolicyPrincipalTypeAgent {
+		ValidationError(w, "principalType must be 'user', 'group', or 'agent'", nil)
 		return
 	}
 	if req.PrincipalID == "" {
@@ -406,7 +436,7 @@ func (s *Server) handlePolicyBindingByID(w http.ResponseWriter, r *http.Request,
 	principalType := parts[0]
 	principalID := parts[1]
 
-	if principalType != store.PolicyPrincipalTypeUser && principalType != store.PolicyPrincipalTypeGroup {
+	if principalType != store.PolicyPrincipalTypeUser && principalType != store.PolicyPrincipalTypeGroup && principalType != store.PolicyPrincipalTypeAgent {
 		NotFound(w, "Binding")
 		return
 	}
@@ -435,4 +465,134 @@ func (s *Server) removePolicyBinding(w http.ResponseWriter, r *http.Request, pol
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handlePolicyEvaluate handles POST /api/v1/policies/evaluate
+func (s *Server) handlePolicyEvaluate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		MethodNotAllowed(w)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Require authenticated user (admin or the evaluated principal)
+	callerIdentity := GetIdentityFromContext(ctx)
+	if callerIdentity == nil {
+		Unauthorized(w)
+		return
+	}
+
+	var req EvaluateRequest
+	if err := readJSON(r, &req); err != nil {
+		BadRequest(w, "Invalid request body: "+err.Error())
+		return
+	}
+
+	if req.PrincipalType == "" || req.PrincipalID == "" {
+		ValidationError(w, "principalType and principalId are required", nil)
+		return
+	}
+	if req.ResourceType == "" {
+		ValidationError(w, "resourceType is required", nil)
+		return
+	}
+	if req.Action == "" {
+		ValidationError(w, "action is required", nil)
+		return
+	}
+
+	// Authorization: only admins or the evaluated principal can call this
+	if callerUser, ok := callerIdentity.(UserIdentity); ok {
+		if callerUser.Role() != "admin" && callerIdentity.ID() != req.PrincipalID {
+			Forbidden(w)
+			return
+		}
+	} else if callerIdentity.ID() != req.PrincipalID {
+		Forbidden(w)
+		return
+	}
+
+	// Build the resource
+	resource := Resource{
+		Type: req.ResourceType,
+		ID:   req.ResourceID,
+	}
+
+	// If a resourceID is provided, look up the resource for owner/parent info
+	if req.ResourceID != "" {
+		populateResourceContext(ctx, s, &resource, req.ResourceType, req.ResourceID)
+	}
+
+	// Build the identity from the request
+	var evalIdentity Identity
+	var effectiveGroups []string
+
+	switch req.PrincipalType {
+	case "user":
+		user, err := s.store.GetUser(ctx, req.PrincipalID)
+		if err != nil {
+			NotFound(w, "User")
+			return
+		}
+		evalIdentity = NewAuthenticatedUser(user.ID, user.Email, user.DisplayName, user.Role, "api")
+		groupIDs, _ := s.store.GetEffectiveGroups(ctx, user.ID)
+		effectiveGroups = groupIDs
+	case "agent":
+		agent, err := s.store.GetAgent(ctx, req.PrincipalID)
+		if err != nil {
+			NotFound(w, "Agent")
+			return
+		}
+		evalIdentity = &evaluateAgentIdentity{
+			id:      agent.ID,
+			groveID: agent.GroveID,
+		}
+		groupIDs, _ := s.store.GetEffectiveGroupsForAgent(ctx, agent.ID)
+		effectiveGroups = groupIDs
+	default:
+		ValidationError(w, "principalType must be 'user' or 'agent'", nil)
+		return
+	}
+
+	decision := s.authzService.CheckAccess(ctx, evalIdentity, resource, Action(req.Action))
+
+	writeJSON(w, http.StatusOK, EvaluateResponse{
+		Allowed:         decision.Allowed,
+		Reason:          decision.Reason,
+		MatchedPolicy:   decision.PolicyID,
+		PolicyName:      decision.PolicyName,
+		Scope:           decision.Scope,
+		EffectiveGroups: effectiveGroups,
+	})
+}
+
+// evaluateAgentIdentity is a minimal AgentIdentity for evaluation purposes.
+type evaluateAgentIdentity struct {
+	id      string
+	groveID string
+}
+
+func (e *evaluateAgentIdentity) ID() string                    { return e.id }
+func (e *evaluateAgentIdentity) Type() string                  { return "agent" }
+func (e *evaluateAgentIdentity) GroveID() string               { return e.groveID }
+func (e *evaluateAgentIdentity) Scopes() []AgentTokenScope     { return nil }
+func (e *evaluateAgentIdentity) HasScope(AgentTokenScope) bool { return true }
+
+// populateResourceContext fills in owner/parent info from the store.
+func populateResourceContext(ctx context.Context, s *Server, resource *Resource, resourceType, resourceID string) {
+	switch resourceType {
+	case "agent":
+		agent, err := s.store.GetAgent(ctx, resourceID)
+		if err == nil {
+			resource.OwnerID = agent.OwnerID
+			resource.ParentType = "grove"
+			resource.ParentID = agent.GroveID
+		}
+	case "grove":
+		grove, err := s.store.GetGrove(ctx, resourceID)
+		if err == nil {
+			resource.OwnerID = grove.OwnerID
+		}
+	}
 }

@@ -456,6 +456,13 @@ type GroupFilter struct {
 	GroveID   string // Filter by grove ID (for grove_agents groups)
 }
 
+// PrincipalRef identifies a principal by type and ID.
+// Used for bulk policy lookups across multiple principals.
+type PrincipalRef struct {
+	Type string // "user", "group", or "agent"
+	ID   string // Principal UUID
+}
+
 // PolicyStore defines policy-related persistence operations.
 type PolicyStore interface {
 	// CreatePolicy creates a new policy record.
@@ -477,7 +484,7 @@ type PolicyStore interface {
 	// ListPolicies returns policies matching the filter criteria.
 	ListPolicies(ctx context.Context, filter PolicyFilter, opts ListOptions) (*ListResult[Policy], error)
 
-	// AddPolicyBinding binds a principal (user or group) to a policy.
+	// AddPolicyBinding binds a principal (user, group, or agent) to a policy.
 	// Returns ErrAlreadyExists if the binding already exists.
 	AddPolicyBinding(ctx context.Context, binding *PolicyBinding) error
 
@@ -490,6 +497,10 @@ type PolicyStore interface {
 
 	// GetPoliciesForPrincipal returns all policies bound to a specific principal.
 	GetPoliciesForPrincipal(ctx context.Context, principalType, principalID string) ([]Policy, error)
+
+	// GetPoliciesForPrincipals returns all policies bound to any of the given principals.
+	// Results are ordered by scope_type then priority ASC.
+	GetPoliciesForPrincipals(ctx context.Context, principals []PrincipalRef) ([]Policy, error)
 }
 
 // PolicyFilter defines criteria for filtering policies.
