@@ -38,6 +38,31 @@ func GetDefaultSettingsData() ([]byte, error) {
 		return nil, err
 	}
 
+	// Detect whether embedded defaults use versioned or legacy format
+	version, _ := DetectSettingsFormat(data)
+	if version != "" {
+		// Versioned format: unmarshal into VersionedSettings, adjust, convert to legacy
+		var vs VersionedSettings
+		if err := yaml.Unmarshal(data, &vs); err != nil {
+			return nil, err
+		}
+
+		// Apply OS-specific runtime adjustment for local profile
+		if local, ok := vs.Profiles["local"]; ok {
+			if runtime.GOOS == "darwin" {
+				local.Runtime = "container"
+			} else {
+				local.Runtime = "docker"
+			}
+			vs.Profiles["local"] = local
+		}
+
+		// Convert to legacy and return JSON for backward compatibility
+		legacy := convertVersionedToLegacy(&vs)
+		return json.MarshalIndent(legacy, "", "  ")
+	}
+
+	// Legacy format: existing behavior
 	var settings Settings
 	if err := yaml.Unmarshal(data, &settings); err != nil {
 		return nil, err

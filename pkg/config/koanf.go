@@ -52,16 +52,7 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 	}
 
 	// 3. Load grove settings
-	// If grovePath is empty, try to find the project grove
-	effectiveGrovePath := grovePath
-	if effectiveGrovePath == "" {
-		if projectPath, ok := FindProjectRoot(); ok {
-			effectiveGrovePath = projectPath
-		}
-	} else if effectiveGrovePath == "global" || effectiveGrovePath == "home" {
-		// For global/home, we already loaded global settings above
-		effectiveGrovePath = ""
-	}
+	effectiveGrovePath := resolveEffectiveGrovePath(grovePath)
 	// Only load grove settings if it's different from global (avoid double-loading)
 	if effectiveGrovePath != "" && effectiveGrovePath != globalDir {
 		if err := loadSettingsFile(k, effectiveGrovePath); err != nil {

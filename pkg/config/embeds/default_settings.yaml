@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Scion Agent Configuration
+# Scion Agent Configuration (v1)
 #
 # Settings merge order: defaults -> global (~/.scion/) -> grove (.scion/)
 # Top-level settings can be overridden via environment variables.
+
+schema_version: "1"
 
 # Active profile determines which runtime to use
 # Env: SCION_ACTIVE_PROFILE
@@ -29,34 +31,35 @@ default_template: gemini
 cli:
   autohelp: true
 
-# Bucket configuration for cloud storage (optional)
-# bucket:
-#   provider: ""      # Env: SCION_BUCKET_PROVIDER
-#   name: ""          # Env: SCION_BUCKET_NAME
-#   prefix: ""        # Env: SCION_BUCKET_PREFIX
-
 # Runtime configurations
 runtimes:
   docker:
+    type: docker
     host: ""
   container:
+    type: container
     tmux: true
   kubernetes:
+    type: kubernetes
     context: ""
     namespace: ""
 
-# Harness definitions
-harnesses:
+# Harness configurations
+harness_configs:
   gemini:
+    harness: gemini
     image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-gemini:latest
     user: scion
   claude:
+    harness: claude
     image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-claude:latest
     user: scion
   opencode:
+    harness: opencode
     image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-opencode:latest
     user: scion
   codex:
+    harness: codex
     image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-codex:latest
     user: scion
 
