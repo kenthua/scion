@@ -627,20 +627,25 @@ WARNING: Legacy settings format detected in /path/to/settings.yaml
 
 ## 6. Phased Implementation Plan
 
-### Phase 1: Schema Foundation
+### Phase 1: Schema Foundation ✅ COMPLETE
 
 **Goal:** Introduce the JSON Schema, versioned settings struct, and detection/validation infrastructure without changing any runtime behavior.
 
 **Deliverables:**
-1. Create `pkg/config/schemas/settings-v1.schema.json` (the full schema from Section 3.5).
-2. Create `pkg/config/schemas/agent-v1.schema.json`.
-3. Embed schemas via `//go:embed` in a new `pkg/config/schema.go`.
-4. Implement `DetectSettingsFormat(data []byte) (version string, isLegacy bool)` — inspects a settings file to determine if it's versioned or legacy.
-5. Implement `ValidateSettings(data []byte, schemaVersion string) []ValidationError` — validates a settings file against its declared schema using an embedded JSON Schema validator.
-6. Add a `scion config validate` command that validates the current effective settings and reports errors.
-7. Write tests for schema validation with valid, invalid, and legacy input.
+1. ✅ Create `pkg/config/schemas/settings-v1.schema.json` (the full schema from Section 3.5).
+2. ✅ Create `pkg/config/schemas/agent-v1.schema.json`.
+3. ✅ Embed schemas via `//go:embed` in a new `pkg/config/schema.go`.
+4. ✅ Implement `DetectSettingsFormat(data []byte) (version string, isLegacy bool)` — inspects a settings file to determine if it's versioned or legacy.
+5. ✅ Implement `ValidateSettings(data []byte, schemaVersion string) []ValidationError` — validates a settings file against its declared schema using an embedded JSON Schema validator.
+6. ✅ Add a `scion config validate` command that validates the current effective settings and reports errors.
+7. ✅ Write tests for schema validation with valid, invalid, and legacy input.
 
 **No behavior changes.** Existing settings loading continues to use the legacy path.
+
+**Implementation notes:**
+- Uses `github.com/santhosh-tekuri/jsonschema/v6` for JSON Schema Draft 2020-12 validation.
+- Also implements `ValidateAgentConfig()` for agent schema validation and `GetSettingsSchemaJSON()`/`GetAgentSchemaJSON()` for schema retrieval.
+- 33 tests in `pkg/config/schema_test.go` covering detection, validation, and edge cases.
 
 ### Phase 2: New Settings Structs & Loader
 
