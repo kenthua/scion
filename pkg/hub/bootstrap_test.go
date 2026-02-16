@@ -406,7 +406,8 @@ func TestCreateAgentWithWorkspaceBootstrap_NoTask(t *testing.T) {
 	groveID, _ := setupGroveAndBroker(t, s)
 
 	// WorkspaceFiles without a task should NOT trigger bootstrap upload —
-	// instead the agent is provisioned (created status) without starting.
+	// since ProvisionOnly is not set, the agent is dispatched via DispatchAgentCreate.
+	// Without a broker-reported status, it falls back to "provisioning".
 	body := CreateAgentRequest{
 		Name:    "bootstrap-no-task",
 		GroveID: groveID,
@@ -426,9 +427,10 @@ func TestCreateAgentWithWorkspaceBootstrap_NoTask(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	// Agent should be in created status (provisioned, not started)
-	if resp.Agent.Status != store.AgentStatusCreated {
-		t.Errorf("expected status 'created', got %q", resp.Agent.Status)
+	// Agent is dispatched via DispatchAgentCreate (ProvisionOnly is false).
+	// The mock dispatcher doesn't set a status, so it falls back to provisioning.
+	if resp.Agent.Status != store.AgentStatusProvisioning {
+		t.Errorf("expected status 'provisioning', got %q", resp.Agent.Status)
 	}
 
 	// No upload URLs since no task was provided

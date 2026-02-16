@@ -495,6 +495,15 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 // applyBrokerResponse updates agent fields from the broker's response.
 func (d *HTTPAgentDispatcher) applyBrokerResponse(agent *store.Agent, resp *RemoteAgentResponse) {
 	if resp.Agent != nil {
+		if d.debug {
+			slog.Debug("applyBrokerResponse: applying broker status",
+				"agentName", agent.Name,
+				"previousStatus", agent.Status,
+				"brokerStatus", resp.Agent.Status,
+				"containerStatus", resp.Agent.ContainerStatus,
+				"brokerAgentID", resp.Agent.ID,
+			)
+		}
 		agent.Status = resp.Agent.Status
 		agent.ContainerStatus = resp.Agent.ContainerStatus
 		if resp.Agent.ID != "" {
@@ -507,6 +516,10 @@ func (d *HTTPAgentDispatcher) applyBrokerResponse(agent *store.Agent, resp *Remo
 		if resp.Agent.Runtime != "" {
 			agent.Runtime = resp.Agent.Runtime
 		}
+	} else if d.debug {
+		slog.Debug("applyBrokerResponse: broker response has nil Agent",
+			"agentName", agent.Name,
+		)
 	}
 }
 

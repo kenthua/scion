@@ -1184,3 +1184,61 @@ func TestListGroveAgents_ServerTimeIncluded(t *testing.T) {
 	assert.True(t, !resp.ServerTime.After(after.Add(time.Second)),
 		"ServerTime should not be after request end")
 }
+
+// TestCreateGroveAgent_BrokerStatusPreserved tests that the grove-scoped agent creation
+// endpoint (/api/v1/groves/{groveId}/agents) preserves the status set by the broker's
+// response rather than unconditionally overwriting it with "provisioning".
+func TestCreateGroveAgent_BrokerStatusPreserved(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create agent via the grove-scoped endpoint (this is the path the CLI uses)
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/agents", grove.ID),
+		CreateAgentRequest{
+			Name: "grove-status-test",
+			Task: "do something",
+		})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+
+	// The response should reflect the broker-reported status, not hardcoded "provisioning"
+	assert.Equal(t, store.AgentStatusRunning, resp.Agent.Status,
+		"grove-scoped agent status should reflect broker response, not hardcoded provisioning")
+
+	// Verify persisted status in store
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	assert.Equal(t, store.AgentStatusRunning, persisted.Status,
+		"persisted agent status should match broker response")
+}
+
+// TestCreateGroveAgent_FallbackToProvisioningWhenNoBrokerStatus tests that the grove-scoped
+// endpoint falls back to "provisioning" when the broker doesn't report a status.
+func TestCreateGroveAgent_FallbackToProvisioningWhenNoBrokerStatus(t *testing.T) {
+	// Dispatcher that doesn't set a status (leaves it as "pending")
+	disp := &createAgentDispatcher{createStatus: ""}
+	srv, _, grove := setupCreateAgentServer(t, disp)
+
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/agents", grove.ID),
+		CreateAgentRequest{
+			Name: "grove-fallback-test",
+			Task: "do something",
+		})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+
+	// When broker doesn't report a status, should fall back to "provisioning"
+	assert.Equal(t, store.AgentStatusProvisioning, resp.Agent.Status,
+		"agent status should fall back to provisioning when broker doesn't report status")
+}

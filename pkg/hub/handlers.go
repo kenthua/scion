@@ -1825,8 +1825,11 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 				warnings = append(warnings, "Failed to dispatch to runtime broker: "+err.Error())
 				// The agent remains in pending status
 			} else {
-				// Update agent status to reflect it's being started
-				agent.Status = store.AgentStatusProvisioning
+				// agent.Status is already set by applyBrokerResponse in DispatchAgentCreate.
+				// Only fall back to provisioning if the broker didn't report a status.
+				if agent.Status == store.AgentStatusPending {
+					agent.Status = store.AgentStatusProvisioning
+				}
 				if err := s.store.UpdateAgent(ctx, agent); err != nil {
 					warnings = append(warnings, "Failed to update agent status: "+err.Error())
 				}
