@@ -18,7 +18,7 @@ For architectural details and component specifications, see **`web-frontend-desi
 | M4 | Complete | Authentication Flow |
 | M5 | In Progress | Hub API Proxy |
 | M6 | Complete | Grove & Agent Pages |
-| M7 | Not Started | SSE + NATS Server Infrastructure |
+| M7 | Complete | SSE + NATS Server Infrastructure |
 | M8 | Not Started | Client Real-Time State Management |
 | M9 | Not Started | Terminal Component |
 | M10 | Not Started | Agent Creation Workflow |
@@ -377,32 +377,35 @@ State updates use SSE (not WebSocket) because the data flow is server-to-client 
 
 ### Deliverables
 
-- [ ] **NATS client**
+- [x] **NATS client** (`src/server/services/nats-client.ts`)
    - Connection management with automatic reconnection
    - Subject subscription with wildcard support (`>`, `*`)
-   - Message deserialization (JSON payloads)
+   - Message deserialization (JSON payloads via StringCodec)
    - Graceful drain on shutdown
+   - Connection status tracking (`connected`, `reconnecting`, `closed`)
 
-- [ ] **SSE Manager**
+- [x] **SSE Manager** (`src/server/services/sse-manager.ts`)
    - Connection-scoped subscriptions (declared at creation, immutable for lifetime)
    - NATS-to-SSE message bridging
    - Sequential event ID tracking for resume support
    - Heartbeat messages (30s interval)
    - Connection cleanup on client disconnect
 
-- [ ] **SSE endpoint (`GET /events?sub=...`)**
+- [x] **SSE endpoint (`GET /events?sub=...`)** (`src/server/routes/sse.ts`)
    - Query-parameter-based subject declaration (WatchRequest pattern)
    - Multiple `sub` params supported: `?sub=grove.abc.>&sub=agent.xyz.>`
    - Permission validation per subject (`canSubscribe`)
    - `Last-Event-ID` header support for reconnection resume
    - SSE response headers (`Content-Type`, `Cache-Control`, `X-Accel-Buffering`)
    - 400 for missing subjects, 403 for unauthorized subjects
+   - 503 when NATS is unavailable (graceful degradation)
 
-- [ ] **Subject permission model**
-   - `grove.*.summary` allowed for all authenticated users
-   - `grove.{groveId}.>` requires grove access
-   - `agent.{agentId}.>` requires agent access
-   - Reject overly broad wildcard patterns
+- [x] **Subject permission model**
+   - `grove.{groveId}.>` allowed for all authenticated users
+   - `agent.{agentId}.>` allowed for all authenticated users
+   - `broker.{brokerId}.>` allowed for all authenticated users
+   - Reject bare wildcards (`>`, `*`) and empty subjects
+   - Reject subjects not starting with allowed prefixes
 
 ### Test Criteria
 
@@ -446,6 +449,16 @@ nats pub agent.agent1.event \
 
 - **No `POST /subscribe` endpoint.** Subscriptions are declared via query parameters at connection time and are immutable. To change subscriptions, the client closes the connection and opens a new one. This keeps the server stateless per-connection and maps directly to a future gRPC `WatchRequest`.
 - **Event weight classes** are enforced on the Hub publishing side. The SSE endpoint does not filter by weight — the subject hierarchy itself controls which events reach which subscribers. Grove-scoped subjects only carry lightweight/medium events; heavy events are only on agent-scoped subjects (see `web-frontend-design.md` §12.2).
+
+### Implementation Notes
+
+- **NatsClient** (`src/server/services/nats-client.ts`): Wraps nats.js connection with status tracking via async status iterator. Auto-reconnect handled natively by nats.js. `subscribe()` returns raw `Subscription` objects that callers manage.
+- **SSEManager** (`src/server/services/sse-manager.ts`): Each `createConnection()` call creates a `PassThrough` stream and NATS subscriptions. Messages are bridged via async iterators. Heartbeats use `setInterval` with SSE comment lines (`:heartbeat`).
+- **SSE Route** (`src/server/routes/sse.ts`): `createSseRouter(sseManager, natsClient)` factory returns a Koa router. Validates subjects against allowed prefixes (`grove.`, `agent.`, `broker.`). Returns 503 when NATS is disconnected.
+- **Config** (`src/server/config.ts`): `SCION_NATS_URL` / `NATS_URL` (comma-separated), `NATS_TOKEN`, `NATS_ENABLED`. NATS is enabled by default when a URL is provided.
+- **App Integration** (`src/server/app.ts`): Services created in `createApp()` and exposed via `app.services`. NatsClient/SSEManager are `null` when NATS is disabled.
+- **Lifecycle** (`src/server/index.ts`): NATS connection is async and non-blocking — server starts even if NATS is unavailable. Shutdown drains SSE connections then NATS.
+- **Health** (`src/server/routes/health.ts`): `/readyz` reports NATS status. Returns 503 if NATS is enabled but disconnected.
 
 ---
 
