@@ -469,3 +469,123 @@ profiles:
 		t.Fatal("expected env to be set")
 	}
 }
+
+// TestEnvGather_SecretAutoUpgrade tests that when all required env keys are
+// satisfied by resolved secrets, the env-gather check passes through without
+// returning 202. The agent proceeds to creation (which may fail for other
+// reasons in the test environment, but the key point is no 202 is returned).
+func TestEnvGather_SecretAutoUpgrade(t *testing.T) {
+	settings := `
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+    env:
+      API_KEY: ""
+profiles:
+  default:
+    runtime: docker
+`
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
+
+	// Satisfy ANTHROPIC_API_KEY (from harness) via broker env
+	t.Setenv("ANTHROPIC_API_KEY", "broker-ant-key")
+
+	body := `{
+		"name": "test-agent-secret-upgrade",
+		"id": "agent-uuid-secret",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedSecrets": [
+			{"name": "API_KEY", "type": "environment", "target": "API_KEY", "value": "secret-api-key", "source": "user"}
+		],
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// Should NOT return 202 — all env keys are satisfied (API_KEY by secret,
+	// ANTHROPIC_API_KEY by broker env). The request proceeds past env-gather.
+	if w.Code == http.StatusAccepted {
+		t.Fatalf("expected env-gather to pass (not 202), but got 202: %s", w.Body.String())
+	}
+}
+
+// TestEnvGather_SecretPartialSatisfaction tests that when one required key is
+// satisfied by a resolved secret but another is not, the broker returns 202
+// with only the unsatisfied key in needs.
+func TestEnvGather_SecretPartialSatisfaction(t *testing.T) {
+	settings := `
+schema_version: "1"
+harness_configs:
+  claude:
+    harness: claude
+    env:
+      API_KEY: ""
+      OTHER_TOKEN: ""
+profiles:
+  default:
+    runtime: docker
+`
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
+
+	body := `{
+		"name": "test-agent-partial-secret",
+		"id": "agent-uuid-partial",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedSecrets": [
+			{"name": "API_KEY", "type": "environment", "target": "API_KEY", "value": "secret-api-key", "source": "user"}
+		],
+		"config": {"template": "claude", "profile": "default"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// Should return 202 because OTHER_TOKEN is still unsatisfied
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// API_KEY should be in hubHas (satisfied by secret)
+	found := false
+	for _, k := range envReqs.HubHas {
+		if k == "API_KEY" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected API_KEY in hubHas, got %v", envReqs.HubHas)
+	}
+
+	// OTHER_TOKEN should be in needs
+	found = false
+	for _, k := range envReqs.Needs {
+		if k == "OTHER_TOKEN" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected OTHER_TOKEN in needs, got %v", envReqs.Needs)
+	}
+
+	// API_KEY should NOT be in needs
+	for _, k := range envReqs.Needs {
+		if k == "API_KEY" {
+			t.Error("API_KEY should not be in needs (satisfied by secret)")
+		}
+	}
+}

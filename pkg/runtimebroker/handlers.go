@@ -340,6 +340,14 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 		if len(required) > 0 {
+			// Build lookup set of keys satisfied by resolved secrets
+			secretTargets := make(map[string]struct{})
+			for _, s := range req.ResolvedSecrets {
+				if s.Type == "environment" || s.Type == "" {
+					secretTargets[s.Target] = struct{}{}
+				}
+			}
+
 			var hubHas, brokerHas, needs []string
 			for _, key := range required {
 				val, hasVal := env[key]
@@ -350,6 +358,9 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 					} else {
 						brokerHas = append(brokerHas, key)
 					}
+				} else if _, fromSecret := secretTargets[key]; fromSecret {
+					// Key will be projected from a resolved secret at container start
+					hubHas = append(hubHas, key)
 				} else {
 					// Check if broker can supply from its own env
 					if brokerVal := os.Getenv(key); brokerVal != "" {

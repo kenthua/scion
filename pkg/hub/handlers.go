@@ -612,6 +612,24 @@ func (s *Server) buildEnvGatherResponse(ctx context.Context, agent *store.Agent,
 				}
 			}
 		}
+		if source.Scope == "hub" && s.secretBackend != nil {
+			if agent.OwnerID != "" {
+				metas, err := s.secretBackend.List(ctx, secret.Filter{
+					Scope: "user", ScopeID: agent.OwnerID, Name: key,
+				})
+				if err == nil && len(metas) > 0 {
+					source.Scope = "secret"
+				}
+			}
+			if source.Scope == "hub" && agent.GroveID != "" {
+				metas, err := s.secretBackend.List(ctx, secret.Filter{
+					Scope: "grove", ScopeID: agent.GroveID, Name: key,
+				})
+				if err == nil && len(metas) > 0 {
+					source.Scope = "secret"
+				}
+			}
+		}
 		resp.HubHas = append(resp.HubHas, source)
 	}
 

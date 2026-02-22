@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -677,6 +678,73 @@ func TestEnvGather_HubHandler_RetryAfterCancel_GlobalRoute(t *testing.T) {
 	_, err := st.GetAgent(ctx, "stale-agent-global")
 	if err != store.ErrNotFound {
 		t.Errorf("expected stale agent to be deleted, got err=%v", err)
+	}
+}
+
+// TestEnvGather_BuildResponse_SecretScope tests that buildEnvGatherResponse
+// annotates keys with scope "secret" when the Hub's secret backend has a
+// matching secret for the agent's owner or grove.
+func TestEnvGather_BuildResponse_SecretScope(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	// Create a user secret for API_KEY
+	if err := st.CreateSecret(ctx, &store.Secret{
+		ID:             "sec-1",
+		Key:            "API_KEY",
+		EncryptedValue: "encrypted-val",
+		SecretType:     store.SecretTypeEnvironment,
+		Target:         "API_KEY",
+		Scope:          store.ScopeUser,
+		ScopeID:        "owner-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up the secret backend on the server
+	backend := secret.NewLocalBackend(st)
+	srv.SetSecretBackend(backend)
+
+	agent := &store.Agent{
+		ID:      "agent-scope-test",
+		Name:    "scope-test-agent",
+		OwnerID: "owner-1",
+		GroveID: "grove-1",
+	}
+
+	brokerReqs := &RemoteEnvRequirementsResponse{
+		AgentID:  "agent-scope-test",
+		Required: []string{"API_KEY", "OTHER_KEY"},
+		HubHas:   []string{"API_KEY", "OTHER_KEY"},
+		Needs:    []string{},
+	}
+
+	resp := srv.buildEnvGatherResponse(ctx, agent, brokerReqs)
+
+	// Verify API_KEY is annotated as "secret"
+	var apiKeySource, otherKeySource *EnvSource
+	for i := range resp.HubHas {
+		switch resp.HubHas[i].Key {
+		case "API_KEY":
+			apiKeySource = &resp.HubHas[i]
+		case "OTHER_KEY":
+			otherKeySource = &resp.HubHas[i]
+		}
+	}
+
+	if apiKeySource == nil {
+		t.Fatal("expected API_KEY in hubHas")
+	}
+	if apiKeySource.Scope != "secret" {
+		t.Errorf("expected API_KEY scope='secret', got %q", apiKeySource.Scope)
+	}
+
+	if otherKeySource == nil {
+		t.Fatal("expected OTHER_KEY in hubHas")
+	}
+	// OTHER_KEY has no matching secret, so it stays as "hub"
+	if otherKeySource.Scope != "hub" {
+		t.Errorf("expected OTHER_KEY scope='hub', got %q", otherKeySource.Scope)
 	}
 }
 
