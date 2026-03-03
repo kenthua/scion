@@ -162,15 +162,6 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 		return nil, fmt.Errorf("failed to resolve grove path: %w", err)
 	}
 
-	// If no explicit grove path was given and we fell back to global,
-	// that means no project grove was found. In this case, skip Hub sync
-	// to avoid trying to register a non-existent grove. The user should
-	// either run 'scion init' or use --global explicitly.
-	if grovePath == "" && isGlobal {
-		debugf("No project grove found (fell back to global), skipping Hub sync")
-		return nil, nil
-	}
-
 	// Clean up stale broker credentials from grove settings.
 	// These should only exist in global settings, not grove-specific settings.
 	// Earlier versions incorrectly wrote them to grove settings.

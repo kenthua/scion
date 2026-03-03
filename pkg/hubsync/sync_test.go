@@ -17,6 +17,7 @@ package hubsync
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,6 +29,127 @@ import (
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/hubclient"
 )
+
+func TestEnsureHubReady_GlobalFallbackWithHubEnabled(t *testing.T) {
+	// When grovePath="" and the resolution falls back to global, EnsureHubReady
+	// should still attempt hub integration if hub is enabled in global settings.
+	// This was previously broken: the function returned (nil, nil) immediately
+	// when falling back to global, regardless of whether hub was enabled.
+
+	groveID := "test-global-grove-id"
+
+	// Set up a mock hub server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/healthz":
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case r.URL.Path == "/api/v1/groves/"+groveID:
+			// Grove is already registered
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":   groveID,
+				"name": "Global",
+			})
+		case strings.Contains(r.URL.Path, "/agents"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"agents":     []interface{}{},
+				"serverTime": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Create a temp HOME with global .scion directory and hub-enabled settings
+	tmpHome := t.TempDir()
+	globalDir := filepath.Join(tmpHome, ".scion")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatalf("Failed to create global dir: %v", err)
+	}
+
+	// Write settings with hub enabled and endpoint pointing to our test server
+	// grove_id is a top-level setting, not nested under hub
+	settingsContent := fmt.Sprintf(`grove_id: %s
+hub:
+  enabled: true
+  endpoint: %s
+`, groveID, server.URL)
+	if err := os.WriteFile(filepath.Join(globalDir, "settings.yaml"), []byte(settingsContent), 0644); err != nil {
+		t.Fatalf("Failed to write settings: %v", err)
+	}
+
+	// Override HOME so ResolveGrovePath("") falls back to our temp global dir
+	t.Setenv("HOME", tmpHome)
+	// Override hub endpoint via env var to ensure it points to our test server
+	t.Setenv("SCION_HUB_ENDPOINT", server.URL)
+	// Use dev token for auth
+	t.Setenv("SCION_DEV_TOKEN", "test-dev-token")
+	t.Setenv("SCION_AUTH_TOKEN", "")
+
+	// Change to tmpHome so FindProjectRoot() doesn't find the real project
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpHome); err != nil {
+		t.Fatalf("Failed to chdir: %v", err)
+	}
+	defer os.Chdir(origDir)
+
+	hubCtx, err := EnsureHubReady("", EnsureHubReadyOptions{
+		SkipSync:    true,
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("EnsureHubReady returned error: %v", err)
+	}
+	if hubCtx == nil {
+		t.Fatal("EnsureHubReady returned nil; expected hub context when hub is enabled globally")
+	}
+	if !hubCtx.IsGlobal {
+		t.Error("Expected IsGlobal=true for global grove fallback")
+	}
+	if hubCtx.GroveID != groveID {
+		t.Errorf("GroveID = %q, want %q", hubCtx.GroveID, groveID)
+	}
+}
+
+func TestEnsureHubReady_GlobalFallbackWithHubDisabled(t *testing.T) {
+	// When grovePath="" and the resolution falls back to global with hub NOT
+	// enabled, EnsureHubReady should return (nil, nil) - same behavior as before.
+
+	tmpHome := t.TempDir()
+	globalDir := filepath.Join(tmpHome, ".scion")
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
+		t.Fatalf("Failed to create global dir: %v", err)
+	}
+
+	// Write settings with hub NOT enabled
+	settingsContent := `hub:
+  enabled: false
+`
+	if err := os.WriteFile(filepath.Join(globalDir, "settings.yaml"), []byte(settingsContent), 0644); err != nil {
+		t.Fatalf("Failed to write settings: %v", err)
+	}
+
+	t.Setenv("HOME", tmpHome)
+
+	// Change to tmpHome so FindProjectRoot() doesn't find the real project
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpHome); err != nil {
+		t.Fatalf("Failed to chdir: %v", err)
+	}
+	defer os.Chdir(origDir)
+
+	hubCtx, err := EnsureHubReady("", EnsureHubReadyOptions{
+		SkipSync:    true,
+		AutoConfirm: true,
+	})
+	if err != nil {
+		t.Fatalf("EnsureHubReady returned error: %v", err)
+	}
+	if hubCtx != nil {
+		t.Error("EnsureHubReady should return nil when hub is not enabled")
+	}
+}
 
 func TestSyncResult_IsInSync(t *testing.T) {
 	tests := []struct {
