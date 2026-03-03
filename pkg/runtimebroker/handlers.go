@@ -17,7 +17,6 @@ package runtimebroker
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -243,14 +242,14 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Debug log incoming request
 	if s.config.Debug {
-		slog.Debug("Creating agent", "name", req.Name, "slug", req.Slug, "groveID", req.GroveID)
-		slog.Debug("Hub credentials",
+		s.agentLifecycleLog.Debug("Creating agent", "name", req.Name, "slug", req.Slug, "groveID", req.GroveID)
+		s.agentLifecycleLog.Debug("Hub credentials",
 			"hubEndpoint", req.HubEndpoint,
 			"hasToken", req.AgentToken != "",
 			"slug", req.Slug,
 		)
 		if req.Config != nil {
-			slog.Debug("Agent configuration",
+			s.agentLifecycleLog.Debug("Agent configuration",
 				"template", req.Config.Template,
 				"image", req.Config.Image,
 				"templateID", req.Config.TemplateID,
@@ -277,12 +276,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		scionDir := filepath.Join(req.GrovePath, ".scion")
 		if _, err := os.Stat(scionDir); os.IsNotExist(err) {
 			if err := config.InitProject(scionDir, nil); err != nil {
-				slog.Warn("Failed to initialize .scion project for hub-native grove",
+				s.agentLifecycleLog.Warn("Failed to initialize .scion project for hub-native grove",
 					"slug", req.GroveSlug, "path", scionDir, "error", err)
 			}
 		}
 		if s.config.Debug {
-			slog.Debug("Resolved hub-native grove path from slug",
+			s.agentLifecycleLog.Debug("Resolved hub-native grove path from slug",
 				"slug", req.GroveSlug,
 				"path", req.GrovePath,
 			)
@@ -318,12 +317,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if agentToken := req.AgentToken; agentToken != "" {
 		env["SCION_AUTH_TOKEN"] = agentToken
 		if s.config.Debug {
-			slog.Debug("SCION_AUTH_TOKEN set from agent token", "length", len(agentToken))
+			s.agentLifecycleLog.Debug("SCION_AUTH_TOKEN set from agent token", "length", len(agentToken))
 		}
 	} else if devToken := os.Getenv("SCION_AUTH_TOKEN"); devToken != "" {
 		env["SCION_AUTH_TOKEN"] = devToken
 		if s.config.Debug {
-			slog.Debug("SCION_AUTH_TOKEN set from broker env", "length", len(devToken))
+			s.agentLifecycleLog.Debug("SCION_AUTH_TOKEN set from broker env", "length", len(devToken))
 		}
 	}
 	// Set Hub URL with priority:
@@ -335,7 +334,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if hubEndpoint == "" && s.config.HubEndpoint != "" {
 		hubEndpoint = s.config.HubEndpoint
 		if s.config.Debug {
-			slog.Debug("Using server Hub endpoint as fallback", "endpoint", hubEndpoint)
+			s.agentLifecycleLog.Debug("Using server Hub endpoint as fallback", "endpoint", hubEndpoint)
 		}
 	}
 	// Apply ContainerHubEndpoint override. When configured, this replaces the
@@ -345,7 +344,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if s.config.ContainerHubEndpoint != "" {
 		hubEndpoint = s.config.ContainerHubEndpoint
 		if s.config.Debug {
-			slog.Debug("Hub endpoint overridden by ContainerHubEndpoint", "endpoint", hubEndpoint)
+			s.agentLifecycleLog.Debug("Hub endpoint overridden by ContainerHubEndpoint", "endpoint", hubEndpoint)
 		}
 	}
 	// Override with grove settings if available. The grove's hub.endpoint reflects
@@ -363,7 +362,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				if ep := groveSettings.GetHubEndpoint(); ep != "" {
 					hubEndpoint = ep
 					if s.config.Debug {
-						slog.Debug("Hub endpoint resolved from grove settings", "endpoint", ep, "grovePath", req.GrovePath)
+						s.agentLifecycleLog.Debug("Hub endpoint resolved from grove settings", "endpoint", ep, "grovePath", req.GrovePath)
 					}
 				}
 			}
@@ -373,19 +372,19 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		env["SCION_HUB_ENDPOINT"] = hubEndpoint
 		env["SCION_HUB_URL"] = hubEndpoint // legacy compat
 		if s.config.Debug {
-			slog.Debug("SCION_HUB_ENDPOINT set", "endpoint", hubEndpoint)
+			s.agentLifecycleLog.Debug("SCION_HUB_ENDPOINT set", "endpoint", hubEndpoint)
 		}
 	}
 	if req.Slug != "" {
 		env["SCION_AGENT_SLUG"] = req.Slug
 		if s.config.Debug {
-			slog.Debug("SCION_AGENT_SLUG set", "slug", req.Slug)
+			s.agentLifecycleLog.Debug("SCION_AGENT_SLUG set", "slug", req.Slug)
 		}
 	}
 	if req.ID != "" {
 		env["SCION_AGENT_ID"] = req.ID
 		if s.config.Debug {
-			slog.Debug("SCION_AGENT_ID set", "id", req.ID)
+			s.agentLifecycleLog.Debug("SCION_AGENT_ID set", "id", req.ID)
 		}
 	}
 
@@ -406,12 +405,12 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Debug log final env count
 	if s.config.Debug {
-		slog.Debug("Final environment count", "count", len(env))
+		s.agentLifecycleLog.Debug("Final environment count", "count", len(env))
 		for k, v := range env {
 			if k == "SCION_AUTH_TOKEN" {
-				slog.Debug("  ENV", "key", k, "value", "<redacted>")
+				s.agentLifecycleLog.Debug("  ENV", "key", k, "value", "<redacted>")
 			} else {
-				slog.Debug("  ENV", "key", k, "value", v)
+				s.agentLifecycleLog.Debug("  ENV", "key", k, "value", v)
 			}
 		}
 	}
@@ -420,7 +419,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if req.GatherEnv {
 		required, secretInfo := s.extractRequiredEnvKeys(req)
 		if s.config.Debug {
-			slog.Debug("Env-gather: evaluating env completeness",
+			s.envSecretLog.Debug("Env-gather: evaluating env completeness",
 				"gatherEnv", req.GatherEnv,
 				"grovePath", req.GrovePath,
 				"requiredKeys", len(required),
@@ -441,7 +440,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				for k := range secretTargets {
 					targetKeys = append(targetKeys, k)
 				}
-				slog.Debug("Env-gather: resolved secret targets available",
+				s.envSecretLog.Debug("Env-gather: resolved secret targets available",
 					"secretTargetKeys", targetKeys,
 					"resolvedSecretsCount", len(req.ResolvedSecrets),
 				)
@@ -482,7 +481,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				s.pendingEnvGatherMu.Unlock()
 
 				if s.config.Debug {
-					slog.Debug("Env-gather: returning 202 with requirements",
+					s.envSecretLog.Debug("Env-gather: returning 202 with requirements",
 						"required", required,
 						"hubHas", hubHas,
 						"brokerHas", brokerHas,
@@ -513,7 +512,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if s.config.Debug {
-				slog.Debug("Env-gather: all required keys satisfied, proceeding with start",
+				s.envSecretLog.Debug("Env-gather: all required keys satisfied, proceeding with start",
 					"required", required,
 					"hubHas", hubHas,
 					"brokerHas", brokerHas,
@@ -544,7 +543,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Debug log grove path
 	if s.config.Debug && req.GrovePath != "" {
-		slog.Debug("Using grove path from Hub", "path", req.GrovePath)
+		s.agentLifecycleLog.Debug("Using grove path from Hub", "path", req.GrovePath)
 	}
 
 	// Reject global groves in multi-hub mode
@@ -574,7 +573,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		if templatePath != "" {
 			opts.Template = templatePath
 			if s.config.Debug {
-				slog.Debug("Using hydrated template", "path", templatePath)
+				s.agentLifecycleLog.Debug("Using hydrated template", "path", templatePath)
 			}
 		}
 	}
@@ -598,7 +597,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		opts.GrovePath = ""
 		opts.GitClone = gc
 		if s.config.Debug {
-			slog.Debug("Git clone mode enabled",
+			s.agentLifecycleLog.Debug("Git clone mode enabled",
 				"cloneURL", gc.URL, "branch", gc.Branch, "depth", gc.Depth)
 		}
 	}
@@ -610,7 +609,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if len(req.ResolvedSecrets) > 0 {
 		opts.ResolvedSecrets = req.ResolvedSecrets
 		if s.config.Debug {
-			slog.Debug("Received resolved secrets from Hub", "count", len(req.ResolvedSecrets))
+			s.envSecretLog.Debug("Received resolved secrets from Hub", "count", len(req.ResolvedSecrets))
 		}
 	}
 
@@ -641,7 +640,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if s.config.Debug {
-			slog.Debug("Downloading workspace from GCS",
+			s.agentLifecycleLog.Debug("Downloading workspace from GCS",
 				"bucket", bucket,
 				"storagePath", req.WorkspaceStoragePath+"/files",
 				"workspaceDir", workspaceDir,
@@ -802,12 +801,12 @@ func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request, id string) 
 	if softDelete && grovePath != "" {
 		deletedAtStr := query.Get("deletedAt")
 		if err := agent.UpdateAgentConfig(id, grovePath, "deleted", "", ""); err != nil {
-			slog.Warn("Failed to mark agent as deleted in agent-info.json", "agent", id, "error", err)
+			s.agentLifecycleLog.Warn("Failed to mark agent as deleted in agent-info.json", "agent", id, "error", err)
 		}
 		if deletedAtStr != "" {
 			if deletedAt, err := time.Parse(time.RFC3339, deletedAtStr); err == nil {
 				if err := agent.UpdateAgentDeletedAt(id, grovePath, deletedAt); err != nil {
-					slog.Warn("Failed to write deletedAt to agent-info.json", "agent", id, "error", err)
+					s.agentLifecycleLog.Warn("Failed to write deletedAt to agent-info.json", "agent", id, "error", err)
 				}
 			}
 		}
@@ -869,11 +868,11 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&startReq); err != nil {
-			slog.Debug("No task in start request body (ignoring decode error)", "error", err)
+			s.agentLifecycleLog.Debug("No task in start request body (ignoring decode error)", "error", err)
 		}
 	}
 
-	slog.Debug("startAgent called", "id", id, "task", startReq.Task, "grovePath", startReq.GrovePath, "groveSlug", startReq.GroveSlug, "harnessConfig", startReq.HarnessConfig, "resolvedEnvCount", len(startReq.ResolvedEnv))
+	s.agentLifecycleLog.Debug("startAgent called", "id", id, "task", startReq.Task, "grovePath", startReq.GrovePath, "groveSlug", startReq.GroveSlug, "harnessConfig", startReq.HarnessConfig, "resolvedEnvCount", len(startReq.ResolvedEnv))
 
 	// For hub-native groves (GroveSlug set, no local provider path), resolve
 	// the conventional grove path (~/.scion/groves/<slug>/) so the agent is
@@ -890,12 +889,12 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 		scionDir := filepath.Join(startReq.GrovePath, ".scion")
 		if _, err := os.Stat(scionDir); os.IsNotExist(err) {
 			if err := config.InitProject(scionDir, nil); err != nil {
-				slog.Warn("Failed to initialize .scion project for hub-native grove",
+				s.agentLifecycleLog.Warn("Failed to initialize .scion project for hub-native grove",
 					"slug", startReq.GroveSlug, "path", scionDir, "error", err)
 			}
 		}
 		if s.config.Debug {
-			slog.Debug("Resolved hub-native grove path from slug in startAgent",
+			s.agentLifecycleLog.Debug("Resolved hub-native grove path from slug in startAgent",
 				"slug", startReq.GroveSlug,
 				"path", startReq.GrovePath,
 			)
@@ -916,7 +915,7 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 			opts.Env[k] = v
 		}
 		if s.config.Debug {
-			slog.Debug("startAgent: applied resolved env from hub", "count", len(startReq.ResolvedEnv))
+			s.agentLifecycleLog.Debug("startAgent: applied resolved env from hub", "count", len(startReq.ResolvedEnv))
 		}
 	}
 
@@ -952,7 +951,7 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 				if ep := groveSettings.GetHubEndpoint(); ep != "" {
 					hubEndpoint = ep
 					if s.config.Debug {
-						slog.Debug("startAgent: hub endpoint resolved from grove settings", "endpoint", ep, "grovePath", grovePath)
+						s.agentLifecycleLog.Debug("startAgent: hub endpoint resolved from grove settings", "endpoint", ep, "grovePath", grovePath)
 					}
 				}
 			}
@@ -1037,7 +1036,7 @@ func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id string) {
 			hb := conn.Heartbeat
 			go func() {
 				if err := hb.ForceHeartbeat(context.Background()); err != nil {
-					slog.Error("Failed to send forced heartbeat after stop", "agent", id, "error", err)
+					s.agentLifecycleLog.Error("Failed to send forced heartbeat after stop", "agent", id, "error", err)
 				}
 			}()
 		}
@@ -1199,7 +1198,7 @@ func (s *Server) checkAgentPrompt(w http.ResponseWriter, r *http.Request, id str
 			return
 		}
 		// Log the error but return false
-		slog.Warn("Failed to read prompt.md", "path", promptPath, "error", err)
+		s.agentLifecycleLog.Warn("Failed to read prompt.md", "path", promptPath, "error", err)
 		writeJSON(w, http.StatusOK, HasPromptResponse{HasPrompt: false})
 		return
 	}
@@ -1479,7 +1478,7 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	if s.config.Debug {
-		slog.Debug("Finalize-env: merging gathered env", "gatheredKeys", len(req.Env), "totalEnv", len(pending.MergedEnv))
+		s.envSecretLog.Debug("Finalize-env: merging gathered env", "gatheredKeys", len(req.Env), "totalEnv", len(pending.MergedEnv))
 	}
 
 	// Build start options from the pending request
@@ -1499,7 +1498,7 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	if s.config.Debug {
-		slog.Debug("Finalize-env: StartOptions built from pending request",
+		s.envSecretLog.Debug("Finalize-env: StartOptions built from pending request",
 			"name", opts.Name,
 			"grovePath", opts.GrovePath,
 			"template", opts.Template,
@@ -1603,7 +1602,7 @@ func (s *Server) resolveManagerForOpts(opts api.StartOptions) agent.Manager {
 	resolved := agent.ResolveRuntime(opts.GrovePath, opts.Name, opts.Profile)
 
 	if s.config.Debug {
-		slog.Debug("Profile resolved to different runtime",
+		s.agentLifecycleLog.Debug("Profile resolved to different runtime",
 			"profile", opts.Profile,
 			"defaultRuntime", s.runtime.Name(),
 			"resolvedRuntime", resolved.Name(),
@@ -1682,7 +1681,7 @@ func (s *Server) deleteGrove(w http.ResponseWriter, r *http.Request, slug string
 		return
 	}
 	if !strings.HasPrefix(absGrove, absBase+string(filepath.Separator)) {
-		slog.Warn("grove cleanup path traversal blocked", "slug", slug, "resolved", absGrove)
+		s.agentLifecycleLog.Warn("grove cleanup path traversal blocked", "slug", slug, "resolved", absGrove)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -1694,11 +1693,11 @@ func (s *Server) deleteGrove(w http.ResponseWriter, r *http.Request, slug string
 	}
 
 	if err := os.RemoveAll(grovePath); err != nil {
-		slog.Warn("failed to remove grove directory", "slug", slug, "path", grovePath, "error", err)
+		s.agentLifecycleLog.Warn("failed to remove grove directory", "slug", slug, "path", grovePath, "error", err)
 		RuntimeError(w, "Failed to remove grove directory: "+err.Error())
 		return
 	}
 
-	slog.Info("Removed hub-native grove directory", "slug", slug, "path", grovePath)
+	s.agentLifecycleLog.Info("Removed hub-native grove directory", "slug", slug, "path", grovePath)
 	w.WriteHeader(http.StatusNoContent)
 }
