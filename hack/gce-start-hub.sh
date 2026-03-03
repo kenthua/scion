@@ -313,13 +313,14 @@ gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command '
     sudo -u scion sh -c "cd /home/scion/scion-agent && /usr/local/go/bin/go build -o scion ./cmd/scion"
     echo "  -> Binary build took $(( SECONDS - BUILD_START ))s"
 
-    # Stop existing service
-    echo ""
-    echo "==> Configuring GKE credentials..."
-    sudo -u scion sh -c "gcloud container clusters get-credentials scion-demo-cluster --region us-central1 --project deploy-demo-test || true"
+    # Configure GKE credentials if full deploy
+    if [ "$FULL_DEPLOY" = "true" ]; then
+        echo ""
+        echo "==> Configuring GKE credentials..."
+        sudo -u scion sh -c "gcloud container clusters get-credentials scion-demo-cluster --region us-central1 --project deploy-demo-test || true"
+    fi
 
-    echo ""
-    echo "==> Stopping service..."
+    # Stop existing service
     if systemctl is-active --quiet scion-hub; then
         sudo systemctl stop scion-hub
         echo "  -> Service stopped"
