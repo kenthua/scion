@@ -647,6 +647,10 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 			GitClone:     agent.AppliedConfig.GitClone,
 		}
 		req.ResolvedEnv = agent.AppliedConfig.Env
+
+		// Thread through the full inline ScionConfig for broker-side provisioning
+		req.InlineConfig = agent.AppliedConfig.InlineConfig
+
 		if d.debug {
 			d.log.Debug("buildCreateRequest: config sent to broker",
 				"template", agent.Template,
@@ -655,6 +659,7 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 				"profile", agent.AppliedConfig.Profile,
 				"templateID", agent.AppliedConfig.TemplateID,
 				"grovePath", req.GrovePath,
+				"hasInlineConfig", agent.AppliedConfig.InlineConfig != nil,
 			)
 		}
 	}

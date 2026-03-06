@@ -208,7 +208,7 @@ func TestStartAgentViaHub_EnvGatherFailureCleansUp(t *testing.T) {
 		GroveID:  groveID,
 	}
 
-	err = startAgentViaHub(hubCtx, "test-agent", "", false)
+	err = startAgentViaHub(hubCtx, "test-agent", "", false, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "env-gather failed")
 	assert.True(t, deleteCalled, "expected provisioning agent to be deleted on env-gather failure")

@@ -367,23 +367,7 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 	}
 
 	// Check if Hub should be used, excluding the target agent from sync requirements.
-	// This allows starting/resuming an agent even if it exists on Hub but not locally
-	// (will be created via Hub) or if other agents are out of sync.
-	hubCtx, err := CheckHubAvailabilityForAgent(grovePath, agentName, false)
-	if err != nil {
-		return err
-	}
-
-	if hubCtx != nil {
-		return startAgentViaHub(hubCtx, agentName, task, resume)
-	}
-
-	// --notify requires Hub mode
-	if notify {
-		return fmt.Errorf("--notify requires Hub mode. Connect to a Hub with 'scion hub status <endpoint>'")
-	}
-
-	// Load inline config if --config was specified
+	// Load inline config if --config was specified (needed for both local and Hub paths)
 	var inlineCfg *api.ScionConfig
 	var inlineConfigDir string
 	if inlineConfigPath != "" {
@@ -396,6 +380,22 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 		if err := resolveInlineConfigContent(inlineCfg, inlineConfigDir); err != nil {
 			return err
 		}
+	}
+
+	// This allows starting/resuming an agent even if it exists on Hub but not locally
+	// (will be created via Hub) or if other agents are out of sync.
+	hubCtx, err := CheckHubAvailabilityForAgent(grovePath, agentName, false)
+	if err != nil {
+		return err
+	}
+
+	if hubCtx != nil {
+		return startAgentViaHub(hubCtx, agentName, task, resume, inlineCfg)
+	}
+
+	// --notify requires Hub mode
+	if notify {
+		return fmt.Errorf("--notify requires Hub mode. Connect to a Hub with 'scion hub status <endpoint>'")
 	}
 
 	// Local mode
@@ -599,7 +599,7 @@ func waitForTmuxSession(rt runtime.Runtime, agentName string) error {
 	}
 }
 
-func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) error {
+func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool, inlineCfg *api.ScionConfig) error {
 	PrintUsingHub(hubCtx.Endpoint)
 
 	// Get the grove ID for this project
@@ -645,12 +645,27 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		Notify:       notify,
 	}
 
-	// Build config if we have image override, debug mode, or telemetry override
-	if agentImage != "" || debugMode || enableTelemetry || disableTelemetry {
-		req.Config = &hubclient.AgentConfig{
+	// Thread inline config from --config flag into the Hub request.
+	// The inline config is the base; CLI flags override specific fields.
+	if inlineCfg != nil {
+		req.Config = inlineCfg
+		// CLI flags override inline config fields
+		if agentImage != "" {
+			req.Config.Image = agentImage
+		}
+	} else if agentImage != "" || debugMode || enableTelemetry || disableTelemetry {
+		// Build config from CLI flags alone
+		req.Config = &api.ScionConfig{
 			Image: agentImage,
 		}
-		configEnv := make(map[string]string)
+	}
+
+	// Add debug/telemetry env vars to config
+	if req.Config != nil && (debugMode || enableTelemetry || disableTelemetry) {
+		configEnv := req.Config.Env
+		if configEnv == nil {
+			configEnv = make(map[string]string)
+		}
 		if debugMode {
 			configEnv["SCION_DEBUG"] = "1"
 		}

@@ -268,6 +268,11 @@ type RemoteCreateAgentRequest struct {
 	// When set, the broker creates the workspace at ~/.scion/groves/<slug>/
 	// instead of the default worktree-based path.
 	GroveSlug string `json:"groveSlug,omitempty"`
+
+	// InlineConfig carries the full ScionConfig provided via the Hub API's
+	// config field. The broker applies this during agent provisioning,
+	// enabling inline configuration without pre-existing templates.
+	InlineConfig *api.ScionConfig `json:"inlineConfig,omitempty"`
 }
 
 // ResolvedSecret represents a secret resolved by the Hub for projection into an agent container.

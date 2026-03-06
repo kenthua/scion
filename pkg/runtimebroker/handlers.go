@@ -534,6 +534,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		opts.Profile = req.Config.Profile
 	}
 
+	// Pass through inline ScionConfig for provisioning
+	if req.InlineConfig != nil {
+		opts.InlineConfig = req.InlineConfig
+	}
+
 	// Save template slug before hydration may replace opts.Template with a cache path
 	templateSlug := ""
 	if req.Config != nil {

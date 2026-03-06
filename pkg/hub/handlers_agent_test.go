@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/agent/state"
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -1673,7 +1674,7 @@ func TestCreateAgent_ProfileStoredWithConfigOverride(t *testing.T) {
 		GroveID: grove.ID,
 		Profile: "other-profile",
 		Task:    "do something",
-		Config:  &AgentConfigOverride{Image: "custom-image:latest"},
+		Config:  &api.ScionConfig{Image: "custom-image:latest"},
 	})
 
 	require.Equal(t, http.StatusCreated, rec.Code)
@@ -1690,6 +1691,103 @@ func TestCreateAgent_ProfileStoredWithConfigOverride(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, persisted.AppliedConfig)
 	assert.Equal(t, "other-profile", persisted.AppliedConfig.Profile)
+}
+
+func TestCreateAgent_ScionConfigInlineConfigPreserved(t *testing.T) {
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Create an agent with a full ScionConfig including fields beyond the old AgentConfigOverride
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "inline-config-agent",
+		GroveID: grove.ID,
+		Task:    "review code",
+		Config: &api.ScionConfig{
+			Image:            "custom:latest",
+			Model:            "claude-opus-4-6",
+			Env:              map[string]string{"FOO": "bar"},
+			HarnessConfig:    "claude-default",
+			AuthSelectedType: "api-key",
+			SystemPrompt:     "You are a code reviewer.",
+			MaxTurns:         50,
+		},
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+	require.NotNil(t, resp.Agent.AppliedConfig)
+
+	// Verify extracted fields
+	assert.Equal(t, "custom:latest", resp.Agent.AppliedConfig.Image)
+	assert.Equal(t, "claude-opus-4-6", resp.Agent.AppliedConfig.Model)
+	assert.Equal(t, map[string]string{"FOO": "bar"}, resp.Agent.AppliedConfig.Env)
+	assert.Equal(t, "claude-default", resp.Agent.AppliedConfig.HarnessConfig)
+	assert.Equal(t, "api-key", resp.Agent.AppliedConfig.HarnessAuth)
+	assert.Equal(t, "review code", resp.Agent.AppliedConfig.Task)
+
+	// Verify the full inline config is preserved
+	require.NotNil(t, resp.Agent.AppliedConfig.InlineConfig, "InlineConfig should be preserved")
+	assert.Equal(t, "You are a code reviewer.", resp.Agent.AppliedConfig.InlineConfig.SystemPrompt)
+	assert.Equal(t, 50, resp.Agent.AppliedConfig.InlineConfig.MaxTurns)
+	assert.Equal(t, "claude-opus-4-6", resp.Agent.AppliedConfig.InlineConfig.Model)
+
+	// Verify persisted in store
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.AppliedConfig)
+	require.NotNil(t, persisted.AppliedConfig.InlineConfig)
+	assert.Equal(t, "You are a code reviewer.", persisted.AppliedConfig.InlineConfig.SystemPrompt)
+}
+
+func TestCreateAgent_ScionConfigTaskFieldMerge(t *testing.T) {
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv, _, grove := setupCreateAgentServer(t, disp)
+
+	// When both req.Task and Config.Task are set, req.Task takes precedence
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "task-merge-agent",
+		GroveID: grove.ID,
+		Task:    "request-level task",
+		Config: &api.ScionConfig{
+			Task: "config-level task",
+		},
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+	require.NotNil(t, resp.Agent.AppliedConfig)
+	assert.Equal(t, "request-level task", resp.Agent.AppliedConfig.Task,
+		"Request-level task should take precedence over config-level task")
+}
+
+func TestCreateAgent_ScionConfigTaskFromConfigOnly(t *testing.T) {
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv, _, grove := setupCreateAgentServer(t, disp)
+
+	// When only Config.Task is set (no req.Task), it should be used
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "task-config-only-agent",
+		GroveID: grove.ID,
+		Config: &api.ScionConfig{
+			Task: "config-only task",
+		},
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+	require.NotNil(t, resp.Agent.AppliedConfig)
+	assert.Equal(t, "config-only task", resp.Agent.AppliedConfig.Task,
+		"Config-level task should be used when no request-level task is set")
 }
 
 // TestListAgents_HarnessConfigEnriched verifies that the harness type from

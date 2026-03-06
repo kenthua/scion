@@ -207,6 +207,11 @@ type CreateAgentRequest struct {
 	// RequiredSecrets contains declared secrets from the template config.
 	// Passed by the Hub so the broker can include them in env-gather requirements.
 	RequiredSecrets []api.RequiredSecret `json:"requiredSecrets,omitempty"`
+
+	// InlineConfig carries the full ScionConfig provided via the Hub API.
+	// When set, the broker applies this during agent provisioning, enabling
+	// inline configuration without pre-existing templates on the broker.
+	InlineConfig *api.ScionConfig `json:"inlineConfig,omitempty"`
 }
 
 // CreateAgentConfig contains configuration for agent creation.

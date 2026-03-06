@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/apiclient"
 	"github.com/ptone/scion-agent/pkg/transfer"
 )
@@ -117,7 +118,7 @@ type CreateAgentRequest struct {
 	Workspace     string            `json:"workspace,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
 	Annotations   map[string]string `json:"annotations,omitempty"`
-	Config        *AgentConfig      `json:"config,omitempty"`
+	Config        *api.ScionConfig  `json:"config,omitempty"`
 	Resume        bool              `json:"resume,omitempty"`
 	Attach        bool              `json:"attach,omitempty"` // If true, signals interactive attach mode to the broker/harness
 	ProvisionOnly bool              `json:"provisionOnly,omitempty"` // If true, provision only (write task to prompt.md) without starting

@@ -180,7 +180,7 @@ type CreateAgentRequest struct {
 	Branch        string            `json:"branch,omitempty"`
 	Workspace     string            `json:"workspace,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
-	Config        *AgentConfigOverride `json:"config,omitempty"`
+	Config        *api.ScionConfig `json:"config,omitempty"`
 	Attach        bool              `json:"attach,omitempty"` // If true, signals interactive attach mode to the broker/harness
 	ProvisionOnly bool              `json:"provisionOnly,omitempty"` // If true, provision only (write task to prompt.md) without starting
 	// WorkspaceFiles is populated for non-git workspace bootstrap.
@@ -193,12 +193,6 @@ type CreateAgentRequest struct {
 	Notify bool `json:"notify,omitempty"`
 }
 
-type AgentConfigOverride struct {
-	Image    string            `json:"image,omitempty"`
-	Env      map[string]string `json:"env,omitempty"`
-	Detached *bool             `json:"detached,omitempty"`
-	Model    string            `json:"model,omitempty"`
-}
 
 type CreateAgentResponse struct {
 	Agent    *store.Agent `json:"agent"`
@@ -465,6 +459,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		agent.Template = resolvedTemplate.Slug
 	}
 
+	agent.AppliedConfig = s.buildAppliedConfig(req, harnessConfig, creatorName)
 	if req.Config != nil {
 		agent.Image = req.Config.Image
 		if req.Config.Detached != nil {
@@ -472,30 +467,8 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		} else {
 			agent.Detached = true
 		}
-		agent.AppliedConfig = &store.AgentAppliedConfig{
-			Image:       req.Config.Image,
-			Env:         req.Config.Env,
-			Model:       req.Config.Model,
-			Profile:     req.Profile,
-			HarnessConfig:     harnessConfig,
-			HarnessAuth:       req.HarnessAuth,
-			Task:        req.Task,
-			Attach:      req.Attach,
-			Workspace:   req.Workspace,
-			CreatorName: creatorName,
-		}
 	} else {
 		agent.Detached = true
-		// Store task even when no config override is provided
-		agent.AppliedConfig = &store.AgentAppliedConfig{
-			Profile:     req.Profile,
-			HarnessConfig:     harnessConfig,
-			HarnessAuth:       req.HarnessAuth,
-			Task:        req.Task,
-			Attach:      req.Attach,
-			Workspace:   req.Workspace,
-			CreatorName: creatorName,
-		}
 	}
 
 	s.populateAgentConfig(agent, grove, resolvedTemplate)
@@ -2661,6 +2634,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		agent.Template = resolvedTemplate.Slug
 	}
 
+	agent.AppliedConfig = s.buildAppliedConfig(req, harnessConfig, creatorName)
 	if req.Config != nil {
 		agent.Image = req.Config.Image
 		if req.Config.Detached != nil {
@@ -2668,30 +2642,8 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		} else {
 			agent.Detached = true
 		}
-		agent.AppliedConfig = &store.AgentAppliedConfig{
-			Image:       req.Config.Image,
-			Env:         req.Config.Env,
-			Model:       req.Config.Model,
-			Profile:     req.Profile,
-			HarnessConfig:     harnessConfig,
-			HarnessAuth:       req.HarnessAuth,
-			Task:        req.Task,
-			Attach:      req.Attach,
-			Workspace:   req.Workspace,
-			CreatorName: creatorName,
-		}
 	} else {
 		agent.Detached = true
-		// Store task even when no config override is provided
-		agent.AppliedConfig = &store.AgentAppliedConfig{
-			Profile:     req.Profile,
-			HarnessConfig:     harnessConfig,
-			HarnessAuth:       req.HarnessAuth,
-			Task:        req.Task,
-			Attach:      req.Attach,
-			Workspace:   req.Workspace,
-			CreatorName: creatorName,
-		}
 	}
 
 	s.populateAgentConfig(agent, grove, resolvedTemplate)
@@ -6070,6 +6022,43 @@ func (s *Server) getHarnessConfigFromTemplate(template *store.Template, fallback
 		}
 	}
 	return fallback
+}
+
+// buildAppliedConfig constructs an AgentAppliedConfig from a CreateAgentRequest.
+// When req.Config is a ScionConfig, its fields are extracted into the applied config
+// and the full ScionConfig is preserved as InlineConfig for threading to the broker.
+func (s *Server) buildAppliedConfig(req CreateAgentRequest, harnessConfig string, creatorName string) *store.AgentAppliedConfig {
+	ac := &store.AgentAppliedConfig{
+		Profile:     req.Profile,
+		HarnessConfig:     harnessConfig,
+		HarnessAuth:       req.HarnessAuth,
+		Task:        req.Task,
+		Attach:      req.Attach,
+		Workspace:   req.Workspace,
+		CreatorName: creatorName,
+	}
+
+	if req.Config != nil {
+		ac.Image = req.Config.Image
+		ac.Env = req.Config.Env
+		ac.Model = req.Config.Model
+
+		// Extract ScionConfig-specific fields
+		if req.Config.HarnessConfig != "" {
+			ac.HarnessConfig = req.Config.HarnessConfig
+		}
+		if req.Config.AuthSelectedType != "" {
+			ac.HarnessAuth = req.Config.AuthSelectedType
+		}
+		if req.Config.Task != "" && ac.Task == "" {
+			ac.Task = req.Config.Task
+		}
+
+		// Preserve the full inline config for the broker
+		ac.InlineConfig = req.Config
+	}
+
+	return ac
 }
 
 // populateAgentConfig enriches an agent's AppliedConfig with grove-derived and

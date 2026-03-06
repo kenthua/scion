@@ -196,7 +196,7 @@ func createAgentViaHub(hubCtx *HubContext, agentName string, task string) error 
 	}
 
 	if agentImage != "" {
-		req.Config = &hubclient.AgentConfig{
+		req.Config = &api.ScionConfig{
 			Image: agentImage,
 		}
 	}
