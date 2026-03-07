@@ -43,7 +43,10 @@ var levelToSeverity = map[slog.Level]string{
 
 // GCPHandler is a slog.Handler that formats logs for Google Cloud Logging.
 type GCPHandler struct {
-	handler slog.Handler
+	handler   slog.Handler
+	component string
+	hostname  string
+	preAttrs  []slog.Attr // tracked for label promotion
 }
 
 // NewGCPHandler creates a new GCPHandler.
@@ -82,19 +85,10 @@ func NewGCPHandler(w io.Writer, opts *slog.HandlerOptions, component string) *GC
 	// Create JSON handler
 	jsonHandler := slog.NewJSONHandler(w, opts)
 
-	// Add default labels
-	labels := map[string]string{
-		"component": component,
-	}
-	if hostname != "" {
-		labels["hostname"] = hostname
-		labels["hub"] = hostname
-	}
-
 	return &GCPHandler{
-		handler: jsonHandler.WithAttrs([]slog.Attr{
-			slog.Any(GCPKeyLabels, labels),
-		}),
+		handler:   jsonHandler,
+		component: component,
+		hostname:  hostname,
 	}
 }
 
@@ -103,6 +97,23 @@ func (h *GCPHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *GCPHandler) Handle(ctx context.Context, r slog.Record) error {
+	// Build labels dynamically, promoting agent_id/grove_id
+	labels := map[string]string{
+		"component": h.component,
+	}
+	if h.hostname != "" {
+		labels["hostname"] = h.hostname
+		labels["hub"] = h.hostname
+	}
+	for _, a := range h.preAttrs {
+		promoteAttrToLabels(labels, a)
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		promoteAttrToLabels(labels, a)
+		return true
+	})
+	r.AddAttrs(slog.Any(GCPKeyLabels, labels))
+
 	// Add source location if requested or by default
 	if r.PC != 0 {
 		fs := runtime.CallersFrames([]uintptr{r.PC})
@@ -118,9 +129,22 @@ func (h *GCPHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (h *GCPHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &GCPHandler{handler: h.handler.WithAttrs(attrs)}
+	newPreAttrs := make([]slog.Attr, len(h.preAttrs)+len(attrs))
+	copy(newPreAttrs, h.preAttrs)
+	copy(newPreAttrs[len(h.preAttrs):], attrs)
+	return &GCPHandler{
+		handler:   h.handler.WithAttrs(attrs),
+		component: h.component,
+		hostname:  h.hostname,
+		preAttrs:  newPreAttrs,
+	}
 }
 
 func (h *GCPHandler) WithGroup(name string) slog.Handler {
-	return &GCPHandler{handler: h.handler.WithGroup(name)}
+	return &GCPHandler{
+		handler:   h.handler.WithGroup(name),
+		component: h.component,
+		hostname:  h.hostname,
+		preAttrs:  h.preAttrs,
+	}
 }

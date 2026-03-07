@@ -79,6 +79,52 @@ func TestGCPHandler_EmptyMessageSuppressed(t *testing.T) {
 	assert.Equal(t, "GET", httpReq["requestMethod"])
 }
 
+func TestGCPHandler_LabelsPromoteAgentGrove(t *testing.T) {
+	var buf bytes.Buffer
+	handler := NewGCPHandler(&buf, nil, "test-component")
+	logger := slog.New(handler)
+
+	logger.Info("test message",
+		AttrAgentID, "agent-abc",
+		AttrGroveID, "grove-xyz",
+	)
+
+	var data map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &data)
+	assert.NoError(t, err)
+
+	labels := data[GCPKeyLabels].(map[string]interface{})
+	assert.Equal(t, "test-component", labels["component"])
+	assert.Equal(t, "agent-abc", labels[AttrAgentID])
+	assert.Equal(t, "grove-xyz", labels[AttrGroveID])
+
+	// Also present in payload
+	assert.Equal(t, "agent-abc", data[AttrAgentID])
+	assert.Equal(t, "grove-xyz", data[AttrGroveID])
+}
+
+func TestGCPHandler_LabelsFromWithAttrs(t *testing.T) {
+	var buf bytes.Buffer
+	handler := NewGCPHandler(&buf, nil, "test-component")
+
+	// Simulate Logger(ctx) which uses slog.With()
+	childHandler := handler.WithAttrs([]slog.Attr{
+		slog.String(AttrAgentID, "pre-agent"),
+		slog.String(AttrGroveID, "pre-grove"),
+	})
+	logger := slog.New(childHandler)
+
+	logger.Info("test message")
+
+	var data map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &data)
+	assert.NoError(t, err)
+
+	labels := data[GCPKeyLabels].(map[string]interface{})
+	assert.Equal(t, "pre-agent", labels[AttrAgentID])
+	assert.Equal(t, "pre-grove", labels[AttrGroveID])
+}
+
 func TestSubsystemLogger(t *testing.T) {
 	// Set up a JSON handler writing to a buffer so we can inspect output
 	var buf bytes.Buffer

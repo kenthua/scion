@@ -164,13 +164,13 @@ The project ID is resolved in this order:
 Logs appear in **Logging > Logs Explorer** in the GCP Console. Filter by log name:
 
 ```
-logName="projects/YOUR_PROJECT/logs/scion"
+logName="projects/YOUR_PROJECT/logs/scion-server"
 ```
 
 Or filter by component label:
 
 ```
-logName="projects/YOUR_PROJECT/logs/scion"
+logName="projects/YOUR_PROJECT/logs/scion-server"
 labels.component="scion-hub"
 ```
 
@@ -258,7 +258,7 @@ Request logs are routed based on the server's configuration:
 | Condition | Destination |
 |-----------|-------------|
 | `SCION_SERVER_REQUEST_LOG_PATH` is set | JSON lines written to the specified file |
-| `SCION_CLOUD_LOGGING=true` | Sent to Cloud Logging under log name `scion_request_log` (separate from application logs in `scion`) |
+| `SCION_CLOUD_LOGGING=true` | Sent to Cloud Logging under log name `scion_request_log` (separate from application logs in `scion-server`) |
 | Background / piped mode (no file, no cloud) | Written to stdout as JSON |
 | `--foreground` mode (no file, no cloud) | **Suppressed** — request logs do not appear on stdout in foreground mode to reduce noise |
 
@@ -329,7 +329,7 @@ log.Info("Processing agent", "name", agentName)
 
 ### Cloud Logging Queries
 
-When Cloud Logging is enabled, request logs appear under a separate log name (`scion_request_log`) from application logs (`scion`). This allows independent filtering:
+When Cloud Logging is enabled, request logs appear under a separate log name (`scion_request_log`) from application logs (`scion-server`). This allows independent filtering:
 
 ```
 -- All HTTP request logs
@@ -345,7 +345,7 @@ httpRequest.status >= 400
 labels.grove_id = "my-grove"
 
 -- Correlate a request with its application logs
-logName="projects/YOUR_PROJECT/logs/scion" OR logName="projects/YOUR_PROJECT/logs/scion_request_log"
+logName="projects/YOUR_PROJECT/logs/scion-server" OR logName="projects/YOUR_PROJECT/logs/scion_request_log"
 jsonPayload.request_id = "550e8400-e29b-41d4-a716-446655440000"
 ```
 

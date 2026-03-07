@@ -62,16 +62,24 @@ func NewGCPExporter(config *Config) (*GCPExporter, error) {
 		return nil, fmt.Errorf("creating Cloud Logging client: %w", err)
 	}
 
-	agentID := os.Getenv("SCION_AGENT_ID")
-	logID := "scion-agent"
-	if agentID != "" {
-		logID = fmt.Sprintf("scion-agent/%s", agentID)
+	// Build common labels for agent identification
+	commonLabels := map[string]string{}
+	if agentID := os.Getenv("SCION_AGENT_ID"); agentID != "" {
+		commonLabels["agent_id"] = agentID
+	}
+	if groveID := os.Getenv("SCION_GROVE_ID"); groveID != "" {
+		commonLabels["grove_id"] = groveID
+	}
+
+	var loggerOpts []logging.LoggerOption
+	if len(commonLabels) > 0 {
+		loggerOpts = append(loggerOpts, logging.CommonLabels(commonLabels))
 	}
 
 	return &GCPExporter{
 		traceExporter: traceExp,
 		logClient:     logClient,
-		logger:        logClient.Logger(logID),
+		logger:        logClient.Logger("scion-agents", loggerOpts...),
 		projectID:     config.ProjectID,
 	}, nil
 }

@@ -147,8 +147,8 @@ func TestResolveLogID(t *testing.T) {
 		t.Setenv(EnvCloudLoggingLogID, "")
 
 		got := resolveLogID()
-		if got != "scion" {
-			t.Errorf("resolveLogID() = %s, want scion", got)
+		if got != "scion-server" {
+			t.Errorf("resolveLogID() = %s, want scion-server", got)
 		}
 	})
 }
@@ -313,6 +313,40 @@ func TestResolveLogLevel(t *testing.T) {
 		t.Setenv("SCION_LOG_LEVEL", "")
 		if ResolveLogLevel(false) != slog.LevelInfo {
 			t.Error("expected LevelInfo by default")
+		}
+	})
+}
+
+func TestPromoteAttrToLabels(t *testing.T) {
+	t.Run("agent_id promoted", func(t *testing.T) {
+		labels := map[string]string{}
+		promoteAttrToLabels(labels, slog.String(AttrAgentID, "agent-123"))
+		if labels[AttrAgentID] != "agent-123" {
+			t.Errorf("expected agent_id=agent-123, got %v", labels[AttrAgentID])
+		}
+	})
+
+	t.Run("grove_id promoted", func(t *testing.T) {
+		labels := map[string]string{}
+		promoteAttrToLabels(labels, slog.String(AttrGroveID, "grove-456"))
+		if labels[AttrGroveID] != "grove-456" {
+			t.Errorf("expected grove_id=grove-456, got %v", labels[AttrGroveID])
+		}
+	})
+
+	t.Run("empty values not promoted", func(t *testing.T) {
+		labels := map[string]string{}
+		promoteAttrToLabels(labels, slog.String(AttrAgentID, ""))
+		if _, ok := labels[AttrAgentID]; ok {
+			t.Error("empty agent_id should not be promoted")
+		}
+	})
+
+	t.Run("unrelated attrs ignored", func(t *testing.T) {
+		labels := map[string]string{}
+		promoteAttrToLabels(labels, slog.String("other_key", "value"))
+		if len(labels) != 0 {
+			t.Errorf("expected no labels, got %v", labels)
 		}
 	})
 }

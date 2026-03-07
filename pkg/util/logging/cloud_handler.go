@@ -148,13 +148,20 @@ func (h *CloudHandler) Handle(_ context.Context, r slog.Record) error {
 	// Map slog level to Cloud Logging severity
 	severity := slogLevelToSeverity(r.Level)
 
-	// Build labels
+	// Build labels, promoting agent_id/grove_id from attrs
 	labels := map[string]string{
 		"component": h.component,
 	}
 	if h.hostname != "" {
 		labels["hub"] = h.hostname
 	}
+	for _, a := range h.attrs {
+		promoteAttrToLabels(labels, a)
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		promoteAttrToLabels(labels, a)
+		return true
+	})
 
 	entry := gcplog.Entry{
 		Severity:       severity,
@@ -262,6 +269,16 @@ func addAttrToMap(m map[string]any, a slog.Attr) {
 	m[a.Key] = val.Any()
 }
 
+// promoteAttrToLabels checks if a slog.Attr should be promoted to a GCP label.
+func promoteAttrToLabels(labels map[string]string, a slog.Attr) {
+	switch a.Key {
+	case AttrAgentID, AttrGroveID:
+		if v := a.Value.String(); v != "" {
+			labels[a.Key] = v
+		}
+	}
+}
+
 // resolveProjectID returns the GCP project ID from environment variables.
 // Priority: SCION_GCP_PROJECT_ID > GOOGLE_CLOUD_PROJECT
 func resolveProjectID() string {
@@ -272,12 +289,12 @@ func resolveProjectID() string {
 }
 
 // resolveLogID returns the Cloud Logging log ID from environment variables.
-// Defaults to "scion" if not set.
+// Defaults to "scion-server" if not set.
 func resolveLogID() string {
 	if v := os.Getenv(EnvCloudLoggingLogID); v != "" {
 		return v
 	}
-	return "scion"
+	return "scion-server"
 }
 
 // isCloudLoggingEnabled checks if direct Cloud Logging is enabled via env var.
