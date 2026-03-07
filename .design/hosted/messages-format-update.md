@@ -851,17 +851,17 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 
 ## 13. Implementation Plan
 
-### Phase 1: Core Structured Message (Foundation)
-- Define `StructuredMessage` Go struct in a shared package (e.g., `pkg/messages/`)
-- Include `plain` field in the schema
-- Define closed enum for message types with validation
-- Update `MessageRequest` in Hub and Broker to include `StructuredMessage` field
-- Update Hub handler to accept and forward structured messages
-- Preserve backwards compatibility with plain `Message` field
-- Add `--plain` flag to CLI
-- Update CLI to construct `StructuredMessage` by default
-- Update sender resolution logic in CLI (Hub mode only)
-- Restrict `--all` flag to admin users
+### Phase 1: Core Structured Message (Foundation) ✅ COMPLETE
+- ✅ Define `StructuredMessage` Go struct in a shared package (`pkg/messages/`)
+- ✅ Include `plain` field in the schema
+- ✅ Define closed enum for message types with validation
+- ✅ Update `MessageRequest` in Hub and Broker to include `StructuredMessage` field
+- ✅ Update Hub handler to accept and forward structured messages
+- ✅ Preserve backwards compatibility with plain `Message` field
+- ✅ Add `--plain` and `--attach` flags to CLI
+- ✅ Update CLI to construct `StructuredMessage` by default (Hub mode)
+- ✅ Update sender resolution logic in CLI (Hub mode only)
+- ⏳ Restrict `--all` flag to admin users (deferred — requires admin role checking infrastructure in CLI)
 
 ### Phase 2: Delivery and Harness Updates
 - Update `AgentManager.Message()` to format structured messages for tmux delivery
