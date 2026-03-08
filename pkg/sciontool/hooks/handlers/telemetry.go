@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/sciontool/hooks"
-	"github.com/ptone/scion-agent/pkg/sciontool/hooks/session"
 	"github.com/ptone/scion-agent/pkg/sciontool/log"
 	"github.com/ptone/scion-agent/pkg/sciontool/telemetry"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
@@ -55,8 +54,7 @@ type TelemetryHandler struct {
 	tracer     trace.Tracer
 	logger     *slog.Logger
 	redactor   *telemetry.Redactor
-	spanStore  sync.Map // map[string]*inProgressSpan - keyed by spanKey
-	sessionDir string   // directory for session files (empty = default)
+	spanStore sync.Map // map[string]*inProgressSpan - keyed by spanKey
 
 	// Metric instruments
 	tokensInput    metric.Int64Counter
@@ -267,10 +265,8 @@ func (h *TelemetryHandler) singleSpan(event *hooks.Event, spanName string) {
 	ctx := context.Background()
 	attrs := h.eventToAttributes(event)
 
-	// For session-end events, try to add session metrics and record metric counters
+	// For session-end events, record session metric counters
 	if event.Name == hooks.EventSessionEnd {
-		sessionAttrs := h.getSessionMetricsAttributes()
-		attrs = append(attrs, sessionAttrs...)
 		h.recordSessionMetrics(event)
 	}
 
@@ -353,39 +349,6 @@ func (h *TelemetryHandler) emitLogRecord(ctx context.Context, event *hooks.Event
 	}
 
 	h.logger.LogAttrs(ctx, slog.LevelInfo, spanName, attrs...)
-}
-
-// getSessionMetricsAttributes parses the latest session file and returns attributes.
-func (h *TelemetryHandler) getSessionMetricsAttributes() []attribute.KeyValue {
-	metrics, err := session.ParseLatestSession(h.sessionDir)
-	if err != nil {
-		log.Debug("Failed to parse session metrics: %v", err)
-		return nil
-	}
-
-	attrs := []attribute.KeyValue{
-		attribute.Int("tokens_input", metrics.TokensInput),
-		attribute.Int("tokens_output", metrics.TokensOutput),
-		attribute.Int("tokens_cached", metrics.TokensCached),
-		attribute.Int("turn_count", metrics.TurnCount),
-		attribute.Int64("duration_ms", metrics.Duration.Milliseconds()),
-	}
-
-	if metrics.Model != "" {
-		attrs = append(attrs, attribute.String("model", metrics.Model))
-	}
-
-	// Add tool call statistics
-	for toolName, stats := range metrics.ToolCalls {
-		prefix := "tool." + toolName + "."
-		attrs = append(attrs,
-			attribute.Int(prefix+"calls", stats.Calls),
-			attribute.Int(prefix+"success", stats.Success),
-			attribute.Int(prefix+"errors", stats.Errors),
-		)
-	}
-
-	return attrs
 }
 
 // eventToAttributes converts event data to span attributes.
@@ -540,42 +503,23 @@ func (h *TelemetryHandler) recordEndMetrics(event *hooks.Event, startEventType s
 	}
 }
 
-// recordSessionMetrics records token usage and session counters on session end.
+// recordSessionMetrics records session counters on session end.
+// Token usage metrics are populated via the native OTel pipeline from harnesses,
+// not from Gemini session file parsing.
 func (h *TelemetryHandler) recordSessionMetrics(event *hooks.Event) {
-	ctx := context.Background()
-	baseAttrs := h.metricAttrs()
-
-	// Record session count
-	if h.sessionCount != nil {
-		status := "completed"
-		if event.Data.Error != "" {
-			status = "error"
-		}
-		attrs := append(baseAttrs, attribute.String("status", status))
-		h.sessionCount.Add(ctx, 1, metric.WithAttributes(attrs...))
-	}
-
-	// Parse session file for token metrics
-	metrics, err := session.ParseLatestSession(h.sessionDir)
-	if err != nil {
-		log.Debug("Skipping token metrics - no session data: %v", err)
+	if h.sessionCount == nil {
 		return
 	}
 
-	attrs := baseAttrs
-	if metrics.Model != "" {
-		attrs = append(attrs, attribute.String("model", metrics.Model))
-	}
+	ctx := context.Background()
+	attrs := h.metricAttrs()
 
-	if h.tokensInput != nil && metrics.TokensInput > 0 {
-		h.tokensInput.Add(ctx, int64(metrics.TokensInput), metric.WithAttributes(attrs...))
+	status := "completed"
+	if event.Data.Error != "" {
+		status = "error"
 	}
-	if h.tokensOutput != nil && metrics.TokensOutput > 0 {
-		h.tokensOutput.Add(ctx, int64(metrics.TokensOutput), metric.WithAttributes(attrs...))
-	}
-	if h.tokensCached != nil && metrics.TokensCached > 0 {
-		h.tokensCached.Add(ctx, int64(metrics.TokensCached), metric.WithAttributes(attrs...))
-	}
+	attrs = append(attrs, attribute.String("status", status))
+	h.sessionCount.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
 
 // Flush ends any in-progress spans. Called during shutdown.

@@ -105,7 +105,7 @@ Sciontool receives telemetry from agent processes through multiple channels:
 |---------|--------|--------|----------------|
 | **OTLP Receiver** | Agents with native OTel (Codex, OpenCode) | OTLP gRPC/HTTP | Spans, metrics, logs |
 | **Hook Events** | Harness hook calls | JSON via CLI args | `tool-start`, `tool-end`, `prompt-submit` |
-| **Session Files** | Gemini CLI session JSON | File watch/poll | Token counts, tool calls |
+| ~~**Session Files**~~ | ~~Gemini CLI session JSON~~ | ~~File watch/poll~~ | ~~Token counts, tool calls~~ (Removed — token metrics now sourced via native OTel) |
 | **Stdout/Stderr** | Agent process output | Line-based text | Structured log lines |
 
 ### 3.2 Event Normalization
@@ -655,7 +655,7 @@ The specific approach will be determined based on the chosen cloud backend.
 | Task | Component | Notes |
 |------|-----------|-------|
 | Hook event normalization | `pkg/sciontool/hooks` | Convert hook calls to events |
-| Gemini session file parsing | `pkg/sciontool/hooks/dialects` | Read session-*.json |
+| ~~Gemini session file parsing~~ | ~~`pkg/sciontool/hooks/dialects`~~ | ~~Read session-*.json~~ (Removed) |
 | Claude dialect parser | `pkg/sciontool/hooks/dialects` | Parse CC hook payloads |
 
 ### Phase 3: Hub Aggregation
@@ -1071,7 +1071,7 @@ this settings schema since they use provider-specific namespaces.
 
 **Deliverables:**
 - [x] **Hook Normalization**: TelemetryHandler converts harness hooks to OTLP spans with `agent.*` naming.
-- [x] **Session Parsing**: Logic to parse Gemini CLI `session-*.json` files on session end.
+- [x] ~~**Session Parsing**: Logic to parse Gemini CLI `session-*.json` files on session end.~~ Removed — Gemini session file parsing was harness-specific and never fully exercised; token metrics are now sourced via the native OTel pipeline.
 - [x] **Log Bridge**: `otelslog` integration for Hub and Runtime Broker structured logging.
 - [x] **Attribute Redaction**: Privacy filter implementation for sensitive fields (redact + hash).
 
@@ -1087,7 +1087,6 @@ this settings schema since they use provider-specific namespaces.
 | File | Description |
 |------|-------------|
 | `pkg/sciontool/hooks/handlers/telemetry.go` | TelemetryHandler converts hook events to OTLP spans |
-| `pkg/sciontool/hooks/session/parser.go` | Parses Gemini `session-*.json` for token metrics |
 | `pkg/sciontool/telemetry/filter.go` | Extended with `Redactor` for attribute redaction/hashing |
 | `pkg/util/logging/otel.go` | Multi-handler and OTel bridge support |
 | `pkg/util/logging/otel_provider.go` | LoggerProvider initialization for OTel log bridge |
@@ -1097,7 +1096,7 @@ this settings schema since they use provider-specific namespaces.
 | Hook Event | Span Name | Key Attributes |
 |------------|-----------|----------------|
 | `session-start` | `agent.session.start` | session_id, source |
-| `session-end` | `agent.session.end` | session_id, reason, tokens_*, duration_ms |
+| `session-end` | `agent.session.end` | session_id, reason |
 | `tool-start` | `agent.tool.call` | tool_name, tool_input (redacted) |
 | `tool-end` | `agent.tool.result` | tool_name, success, duration_ms |
 | `prompt-submit` | `agent.user.prompt` | prompt (redacted) |
@@ -1110,13 +1109,6 @@ this settings schema since they use provider-specific namespaces.
 |---------------------|---------|-------------|
 | `SCION_TELEMETRY_REDACT` | `prompt,user.email,tool_output,tool_input` | Fields replaced with `[REDACTED]` |
 | `SCION_TELEMETRY_HASH` | `session_id` | Fields replaced with SHA256 hash |
-
-**Session Metrics Extraction:**
-
-On `session-end` events, the TelemetryHandler parses the latest Gemini session file from `~/.gemini/sessions/` and adds these attributes to the span:
-- `tokens_input`, `tokens_output`, `tokens_cached`
-- `turn_count`, `duration_ms`, `model`
-- Per-tool statistics: `tool.<name>.calls`, `tool.<name>.success`, `tool.<name>.errors`
 
 **OTel Log Bridge Pattern:**
 
@@ -1166,7 +1158,7 @@ Enabled via `SCION_OTEL_LOG_ENABLED=true` with endpoint in `SCION_OTEL_ENDPOINT`
 | `gen_ai.api.calls` | Counter (Int64) | `{call}` | `model-end` | model, status |
 | `gen_ai.api.duration` | Histogram (Float64) | `ms` | `model-end` | model |
 
-Token counters (`gen_ai.tokens.*`) are populated from session file parsing on `session-end`, reusing the existing `session.ParseLatestSession()` logic.
+Token counters (`gen_ai.tokens.*`) are populated via the native OTel metrics pipeline from harnesses that emit OTLP metrics (e.g., Claude Code, Gemini CLI). Gemini session file parsing was removed as it was harness-specific and redundant with the OTel path.
 
 **Label Sources:**
 
@@ -1205,7 +1197,7 @@ Each hook event emits a log record via `otelslog` with the span name as the log 
 | `pkg/sciontool/telemetry/receiver.go` | Added `MetricHandler`, `MetricsServiceServer`, `/v1/metrics` HTTP handler, `ReceiverOption` |
 | `pkg/sciontool/telemetry/exporter.go` | Added `MetricsServiceClient`, `ExportProtoMetrics()` method |
 | `pkg/sciontool/telemetry/pipeline.go` | Added `handleMetrics()`, wired metric handler to receiver |
-| `pkg/sciontool/hooks/handlers/telemetry.go` | Added 8 metric instruments, `initMetrics()`, `recordEndMetrics()`, `recordSessionMetrics()`, correlated log emission |
+| `pkg/sciontool/hooks/handlers/telemetry.go` | Added 8 metric instruments, `initMetrics()`, `recordEndMetrics()`, `recordSessionMetrics()` (session count only; session file parsing removed), correlated log emission |
 | `cmd/sciontool/commands/hook.go` | Pass `MeterProvider` to `NewTelemetryHandler` |
 | `cmd/sciontool/commands/init.go` | Pass `MeterProvider` to `NewTelemetryHandler` |
 
@@ -1331,7 +1323,7 @@ The following matrix maps test scenarios to their blocking gaps:
 | Hook events produce correct spans and metrics | Ready | — |
 | Privacy filtering (redact/hash/exclude) | Ready | — |
 | Correlated logs emitted with trace context | Ready | — |
-| Gemini session file parsing on session-end | Ready | — |
+| ~~Gemini session file parsing on session-end~~ | Removed | — |
 | Settings.yaml telemetry merges across scopes (unit) | Ready | — |
 | Settings.yaml telemetry flows into agent container | Ready | — |
 | Telemetry disabled at grove scope disables agent collection | Ready | — |
