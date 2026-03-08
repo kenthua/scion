@@ -60,6 +60,7 @@ const USED_ICONS = [
   'hourglass-split',
   'info-circle',
   'info-circle-fill',
+  'link-45deg',
   'list',
   'list-ul',
   'moon',
