@@ -161,6 +161,9 @@ func TestInitProject_NonGitCreatesMarkerAndExternalDir(t *testing.T) {
 	if !containsSubstring(string(data), "workspace_path") {
 		t.Error("settings.yaml should contain workspace_path")
 	}
+	if !containsSubstring(string(data), "grove_id") {
+		t.Error("settings.yaml should contain grove_id")
+	}
 }
 
 func TestInitProject_NonGitRejectsOldStyleDir(t *testing.T) {

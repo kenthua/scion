@@ -264,6 +264,54 @@ func TestCountAgents_NonExistentDir(t *testing.T) {
 	}
 }
 
+func TestDiscoverGroves_StaleExternalAfterMarkerRecreate(t *testing.T) {
+	tmpHome := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", origHome)
+
+	os.MkdirAll(filepath.Join(tmpHome, ".scion"), 0755)
+
+	workspace := filepath.Join(tmpHome, "projects", "myproject")
+	os.MkdirAll(workspace, 0755)
+
+	// Simulate the old grove-config (from a previous init)
+	oldConfigDir := filepath.Join(tmpHome, ".scion", "grove-configs", "myproject__aaaaaaaa", ".scion")
+	os.MkdirAll(filepath.Join(oldConfigDir, "agents"), 0755)
+	os.WriteFile(filepath.Join(oldConfigDir, "settings.yaml"),
+		[]byte("workspace_path: "+workspace+"\ngrove_id: aaaaaaaa-0000-0000-0000-000000000000\n"), 0644)
+
+	// Simulate new grove-config (from re-init after marker was deleted)
+	newConfigDir := filepath.Join(tmpHome, ".scion", "grove-configs", "myproject__bbbbbbbb", ".scion")
+	os.MkdirAll(filepath.Join(newConfigDir, "agents"), 0755)
+	os.WriteFile(filepath.Join(newConfigDir, "settings.yaml"),
+		[]byte("workspace_path: "+workspace+"\ngrove_id: bbbbbbbb-0000-0000-0000-000000000000\n"), 0644)
+
+	// Workspace marker now points to the new grove-config
+	marker := &GroveMarker{
+		GroveID:   "bbbbbbbb-0000-0000-0000-000000000000",
+		GroveName: "myproject",
+		GroveSlug: "myproject",
+	}
+	WriteGroveMarker(filepath.Join(workspace, DotScion), marker)
+
+	// The old config should be orphaned because the marker resolves to the new config
+	orphaned, err := FindOrphanedGroveConfigs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(orphaned) != 1 {
+		t.Fatalf("expected 1 orphaned grove-config, got %d", len(orphaned))
+	}
+	if orphaned[0].Name != "myproject" {
+		t.Errorf("expected orphaned name 'myproject', got %s", orphaned[0].Name)
+	}
+	// The orphaned one should be the old config
+	if orphaned[0].ConfigPath != oldConfigDir {
+		t.Errorf("expected orphaned config path %s, got %s", oldConfigDir, orphaned[0].ConfigPath)
+	}
+}
+
 func TestDiscoverGroves_GitGroveExternal(t *testing.T) {
 	tmpHome := t.TempDir()
 	origHome := os.Getenv("HOME")

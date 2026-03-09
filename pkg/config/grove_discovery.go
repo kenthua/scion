@@ -132,9 +132,9 @@ func groveInfoFromExternal(configPath, dirName, slug string) GroveInfo {
 
 	gi.AgentCount = countAgents(filepath.Join(configPath, "agents"))
 
-	// Check if workspace still exists and has a valid marker
+	// Check if workspace still exists and has a valid marker pointing back here
 	if gi.WorkspacePath != "" {
-		if !isValidWorkspace(gi.WorkspacePath, gi.GroveID) {
+		if !isValidWorkspace(gi.WorkspacePath, gi.GroveID, configPath) {
 			gi.Status = GroveStatusOrphaned
 		}
 	} else {
@@ -168,8 +168,10 @@ func groveInfoFromGitExternal(agentsDir, dirName, slug string) GroveInfo {
 }
 
 // isValidWorkspace checks if a workspace path exists and has a valid .scion
-// marker or directory pointing to a grove with the expected ID.
-func isValidWorkspace(workspacePath, expectedGroveID string) bool {
+// marker or directory pointing back to the expected grove config.
+// For external (non-git) groves, configPath is the expected grove-config path;
+// the workspace marker must resolve to the same path.
+func isValidWorkspace(workspacePath, expectedGroveID string, configPath ...string) bool {
 	markerPath := filepath.Join(workspacePath, DotScion)
 	info, err := os.Stat(markerPath)
 	if err != nil {
@@ -186,11 +188,23 @@ func isValidWorkspace(workspacePath, expectedGroveID string) bool {
 		return true
 	}
 
-	// Non-git grove — read marker and compare grove ID
+	// Non-git grove — read marker and verify it resolves to the expected config path
 	marker, err := ReadGroveMarker(markerPath)
 	if err != nil {
 		return false
 	}
+
+	// If a config path was provided, check that the marker resolves to it.
+	// This catches the case where a marker was deleted and re-created with a
+	// new grove-id, leaving the old grove-config orphaned.
+	if len(configPath) > 0 && configPath[0] != "" {
+		resolved, err := marker.ExternalGrovePath()
+		if err != nil {
+			return false
+		}
+		return filepath.Clean(resolved) == filepath.Clean(configPath[0])
+	}
+
 	if expectedGroveID != "" {
 		return marker.GroveID == expectedGroveID
 	}

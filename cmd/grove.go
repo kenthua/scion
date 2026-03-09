@@ -154,11 +154,29 @@ With --global, it initializes in the user's home folder.`,
 			return fmt.Errorf("failed to initialize project grove: %w", err)
 		}
 
-		// Generate and save grove_id
-		groveID := config.GenerateGroveIDForDir(filepath.Dir(targetDir))
-		if err := config.UpdateSetting(targetDir, "grove_id", groveID, false); err != nil {
-			if !isJSONOutput() {
-				fmt.Printf("Warning: failed to save grove_id: %v\n", err)
+		// Resolve the grove_id and save it to settings.
+		// For non-git groves, targetDir (.scion) is now a marker file, so we must
+		// resolve through it to the external config path. The grove-id is already
+		// generated during InitProject — read it back rather than generating a new one.
+		var groveID string
+		markerPath := filepath.Join(filepath.Dir(targetDir), config.DotScion)
+		if config.IsGroveMarkerFile(markerPath) {
+			// Non-git grove: read grove-id from marker, save to external settings
+			marker, err := config.ReadGroveMarker(markerPath)
+			if err == nil {
+				groveID = marker.GroveID
+				// grove_id is already written during initExternalGrove
+			}
+		} else {
+			// Git grove: read grove-id from file, save to in-repo settings
+			groveID, _ = config.ReadGroveID(targetDir)
+			if groveID == "" {
+				groveID = config.GenerateGroveIDForDir(filepath.Dir(targetDir))
+			}
+			if err := config.UpdateSetting(targetDir, "grove_id", groveID, false); err != nil {
+				if !isJSONOutput() {
+					fmt.Printf("Warning: failed to save grove_id: %v\n", err)
+				}
 			}
 		}
 

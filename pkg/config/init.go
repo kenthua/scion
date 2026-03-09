@@ -435,14 +435,14 @@ func initExternalGrove(projectDir string, opt InitProjectOpts) error {
 		return fmt.Errorf("failed to compute external grove path: %w", err)
 	}
 
-	// Write settings with workspace-path before ensureGroveDirs (which would
-	// create a settings.yaml without workspace_path if one doesn't exist yet).
+	// Write settings with workspace-path and grove_id before ensureGroveDirs
+	// (which would create a settings.yaml without workspace_path if one doesn't exist yet).
 	absProjectRoot, _ := filepath.Abs(projectRoot)
 	if err := os.MkdirAll(externalPath, 0755); err != nil {
 		return fmt.Errorf("failed to create external grove directory: %w", err)
 	}
 	if GetSettingsPath(externalPath) == "" {
-		if err := writeGroveSettings(externalPath, absProjectRoot, opt); err != nil {
+		if err := writeGroveSettings(externalPath, absProjectRoot, groveID, opt); err != nil {
 			return err
 		}
 	}
@@ -539,7 +539,7 @@ func ensureGroveDirs(projectDir string, opt InitProjectOpts) error {
 
 // writeGroveSettings writes the initial settings.yaml for an external grove,
 // including the workspace-path field.
-func writeGroveSettings(externalPath, workspacePath string, opt InitProjectOpts) error {
+func writeGroveSettings(externalPath, workspacePath, groveID string, opt InitProjectOpts) error {
 	if !opt.SkipRuntimeCheck {
 		if _, err := DetectLocalRuntime(); err != nil {
 			return err
@@ -557,6 +557,9 @@ func writeGroveSettings(externalPath, workspacePath string, opt InitProjectOpts)
 		return fmt.Errorf("failed to parse default grove settings: %w", err)
 	}
 	settingsMap["workspace_path"] = workspacePath
+	if groveID != "" {
+		settingsMap["grove_id"] = groveID
+	}
 
 	data, err := yaml.Marshal(settingsMap)
 	if err != nil {
