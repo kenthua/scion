@@ -664,7 +664,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool, i
 	var workspaceFiles []transfer.FileInfo
 	if hubCtx.GrovePath != "" {
 		groveDir := filepath.Dir(hubCtx.GrovePath) // parent of .scion
-		if !util.IsGitRepoDir(groveDir) {
+		if _, statErr := os.Stat(groveDir); statErr == nil && !util.IsGitRepoDir(groveDir) {
 			files, err := transfer.CollectFiles(groveDir, transfer.DefaultExcludePatterns)
 			if err != nil {
 				return fmt.Errorf("failed to collect workspace files: %w", err)

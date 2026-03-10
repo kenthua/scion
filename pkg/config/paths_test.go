@@ -314,10 +314,11 @@ func TestFindProjectRoot_MarkerWithHubFallback(t *testing.T) {
 		t.Fatal("expected FindProjectRoot to succeed with marker + hub context")
 	}
 
-	// Should resolve to the external grove path (constructed but not existing)
-	externalPath, _ := marker.ExternalGrovePath()
-	if got != externalPath {
-		t.Errorf("FindProjectRoot() = %q, want %q", got, externalPath)
+	// External grove path doesn't exist on this filesystem, so with hub
+	// context we should fall back to the synthetic workspace .scion path.
+	expectedPath := filepath.Join(tmpDir, ".scion")
+	if got != expectedPath {
+		t.Errorf("FindProjectRoot() = %q, want %q", got, expectedPath)
 	}
 }
 

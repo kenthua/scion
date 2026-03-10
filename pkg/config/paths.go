@@ -52,7 +52,12 @@ func FindProjectRoot() (string, bool) {
 			}
 			// .scion is a file (grove marker) — resolve to external path
 			if resolved, err := ResolveGroveMarker(p); err == nil {
-				return resolved, true
+				// Verify the resolved external path actually exists on this
+				// filesystem. Inside a container the marker may reference a
+				// host-side grove-config directory that doesn't exist locally.
+				if _, statErr := os.Stat(resolved); statErr == nil {
+					return resolved, true
+				}
 			}
 			// Marker file exists but external path can't be resolved
 			// (e.g., inside a container where ~/.scion/grove-configs/ doesn't exist).
