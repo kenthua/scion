@@ -16,10 +16,10 @@ This plan outlines the implementation of a standardized "Skills" support for Sci
 ## 3. Implementation Plan
 
 ### Phase 1: Interface & Harness Updates
-*   [ ] **Action:** Add `SkillsDir()` to the `api.Harness` interface.
+*   [x] **Action:** Add `SkillsDir()` to the `api.Harness` interface.
     *   **Files:** `pkg/api/harness.go`
     *   **Details:** Add `SkillsDir() string` to the interface to allow each harness to define its skill mount point.
-*   [ ] **Action:** Implement `SkillsDir()` for each harness.
+*   [x] **Action:** Implement `SkillsDir()` for each harness.
     *   **Files:** 
         *   `pkg/harness/gemini_cli.go`: Return `.gemini/skills`
         *   `pkg/harness/claude_code.go`: Return `.claude/skills`
@@ -28,7 +28,7 @@ This plan outlines the implementation of a standardized "Skills" support for Sci
         *   `pkg/harness/generic.go`: Return `.scion/skills` (consistent with its `DefaultConfigDir()`)
 
 ### Phase 2: Provisioning Logic
-*   [ ] **Action:** Update `ProvisionAgent` to handle the `skills/` directory.
+*   [x] **Action:** Update `ProvisionAgent` to handle the `skills/` directory.
     *   **Files:** `pkg/agent/provision.go`
     *   **Details:** 
         1.  In `ProvisionAgent`, after copying `home/` files, loop through the template chain.
@@ -37,7 +37,7 @@ This plan outlines the implementation of a standardized "Skills" support for Sci
         4.  Also apply this to the `skills/` directory (if any) in the `harness-config` base layer.
 
 ### Phase 3: Templates & Examples
-*   [ ] **Action:** Add a placeholder `skills/` directory to the default template.
+*   [x] **Action:** Add a placeholder `skills/` directory to the default template.
     *   **Files:** `pkg/config/embeds/templates/default/skills/.gitkeep`
     *   **Details:** Ensure that `scion init` or agent creation creates a visible structure for users to follow.
 *   [ ] **Action:** (Optional) Add a built-in "scion" skill.
