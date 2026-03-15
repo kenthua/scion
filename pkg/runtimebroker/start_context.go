@@ -1,0 +1,337 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package runtimebroker
+
+import (
+	"context"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/GoogleCloudPlatform/scion/pkg/agent"
+	"github.com/GoogleCloudPlatform/scion/pkg/api"
+	"github.com/GoogleCloudPlatform/scion/pkg/config"
+)
+
+// startContext holds all the resolved state needed to start an agent.
+// It is built by buildStartContext from the various handler-specific inputs,
+// unifying grove path resolution, env merging, template hydration, and
+// manager selection into a single code path.
+type startContext struct {
+	Opts         api.StartOptions
+	TemplateSlug string
+	Manager      agent.Manager
+}
+
+// startContextInputs captures the handler-specific fields that vary across
+// createAgent, startAgent, restartAgent, and finalizeEnv. Each handler
+// populates this from its own request structure, then calls buildStartContext.
+type startContextInputs struct {
+	// Agent identity
+	Name    string
+	AgentID string // Hub UUID (for env injection and logging)
+	Slug    string
+
+	// Grove
+	GrovePath string
+	GroveSlug string
+	GroveID   string
+
+	// Config from CreateAgentConfig (nil for startAgent/restartAgent)
+	Config *CreateAgentConfig
+
+	// InlineConfig for provisioning
+	InlineConfig *api.ScionConfig
+
+	// SharedDirs from grove
+	SharedDirs []api.SharedDir
+
+	// Hub auth
+	HubEndpoint string
+	AgentToken  string
+	CreatorName string
+
+	// Env
+	ResolvedEnv     map[string]string
+	ResolvedSecrets []api.ResolvedSecret
+
+	// Behavior
+	Attach bool
+
+	// HTTP request (for hub connection resolution)
+	HTTPRequest *http.Request
+}
+
+// buildStartContext unifies the common startup logic shared by createAgent,
+// startAgent, restartAgent, and finalizeEnv:
+//   - Hub-native grove path resolution (GroveSlug → ~/.scion/groves/<slug>/)
+//   - Merged env assembly (resolved env + config env + auth + hub endpoint + broker identity)
+//   - Template hydration
+//   - Git-clone env injection
+//   - Telemetry override translation
+//   - Resolved secrets passthrough
+//   - Manager resolution
+//
+// The caller may further customize the returned startContext before calling
+// mgr.Start or mgr.Provision.
+func (s *Server) buildStartContext(ctx context.Context, in startContextInputs) (*startContext, error) {
+	// --- Hub-native grove path resolution ---
+	if in.GroveSlug != "" && in.GrovePath == "" {
+		globalDir, err := config.GetGlobalDir()
+		if err != nil {
+			return nil, &startContextError{Status: http.StatusInternalServerError, Message: "Failed to get global dir: " + err.Error()}
+		}
+		in.GrovePath = filepath.Join(globalDir, "groves", in.GroveSlug)
+		scionDir := filepath.Join(in.GrovePath, ".scion")
+		if _, err := os.Stat(scionDir); os.IsNotExist(err) {
+			if err := config.InitProject(scionDir, nil); err != nil {
+				s.agentLifecycleLog.Warn("Failed to initialize .scion project for hub-native grove",
+					"agent_id", in.AgentID, "slug", in.GroveSlug, "path", scionDir, "error", err)
+			}
+		}
+		if s.config.Debug {
+			s.agentLifecycleLog.Debug("Resolved hub-native grove path from slug",
+				"agent_id", in.AgentID, "slug", in.GroveSlug, "path", in.GrovePath)
+		}
+	}
+
+	// --- Build merged environment ---
+	env := make(map[string]string)
+
+	// 1. Resolved env from Hub
+	for k, v := range in.ResolvedEnv {
+		env[k] = v
+	}
+
+	// 2. Config.Env (takes precedence)
+	if in.Config != nil {
+		for _, e := range in.Config.Env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				env[parts[0]] = parts[1]
+			}
+		}
+	}
+
+	// 3. Hub auth token
+	if in.AgentToken != "" {
+		env["SCION_AUTH_TOKEN"] = in.AgentToken
+		if s.config.Debug {
+			s.agentLifecycleLog.Debug("SCION_AUTH_TOKEN set from agent token", "agent_id", in.AgentID, "length", len(in.AgentToken))
+		}
+	} else if devToken := os.Getenv("SCION_AUTH_TOKEN"); devToken != "" {
+		env["SCION_AUTH_TOKEN"] = devToken
+		if s.config.Debug {
+			s.agentLifecycleLog.Debug("SCION_AUTH_TOKEN set from broker env", "agent_id", in.AgentID, "length", len(devToken))
+		}
+	}
+
+	// 4. Hub endpoint
+	runtimeName := ""
+	if s.runtime != nil {
+		runtimeName = s.runtime.Name()
+	}
+
+	var hubEndpoint string
+	if in.HTTPRequest != nil {
+		// Full create path: request-level, connection-level, and broker-level fallbacks
+		hubEndpoint = resolveHubEndpointForCreate(
+			in.HubEndpoint,
+			s.resolveHubEndpointFromRequest(in.HTTPRequest),
+			s.config.HubEndpoint,
+			in.ResolvedEnv,
+			in.GrovePath,
+			s.config.ContainerHubEndpoint,
+			runtimeName,
+		)
+	} else {
+		// Start/restart/finalize path: broker-level and settings fallbacks
+		hubEndpoint = resolveHubEndpointForStart(
+			s.config.HubEndpoint,
+			in.ResolvedEnv,
+			in.GrovePath,
+			s.config.ContainerHubEndpoint,
+			runtimeName,
+		)
+	}
+	if hubEndpoint != "" {
+		env["SCION_HUB_ENDPOINT"] = hubEndpoint
+		env["SCION_HUB_URL"] = hubEndpoint // legacy compat
+		if s.config.Debug {
+			s.agentLifecycleLog.Debug("SCION_HUB_ENDPOINT set", "agent_id", in.AgentID, "endpoint", hubEndpoint)
+		}
+	}
+
+	// 5. Agent identity env
+	if in.Slug != "" {
+		env["SCION_AGENT_SLUG"] = in.Slug
+	}
+	if in.AgentID != "" {
+		env["SCION_AGENT_ID"] = in.AgentID
+	}
+	if in.GroveID != "" {
+		env["SCION_GROVE_ID"] = in.GroveID
+	}
+
+	// 6. Broker identity
+	if s.config.BrokerName != "" {
+		env["SCION_BROKER_NAME"] = s.config.BrokerName
+	}
+	if s.config.BrokerID != "" {
+		env["SCION_BROKER_ID"] = s.config.BrokerID
+	}
+	if in.CreatorName != "" {
+		env["SCION_CREATOR"] = in.CreatorName
+	}
+
+	// 7. Debug
+	if s.config.Debug {
+		env["SCION_DEBUG"] = "1"
+	}
+
+	// Debug log final env
+	if s.config.Debug {
+		s.agentLifecycleLog.Debug("Final environment count", "agent_id", in.AgentID, "count", len(env))
+		for k, v := range env {
+			s.agentLifecycleLog.Debug("  ENV", "agent_id", in.AgentID, "key", k, "value", redactEnvValueForLog(k, v))
+		}
+	}
+
+	// --- Build StartOptions ---
+	opts := api.StartOptions{
+		Name:       in.Name,
+		BrokerMode: true,
+		GrovePath:  in.GrovePath,
+	}
+
+	if in.Attach {
+		opts.Detached = boolPtr(false)
+	} else {
+		opts.Detached = boolPtr(true)
+	}
+
+	if in.Config != nil {
+		opts.Template = in.Config.Template
+		opts.Image = in.Config.Image
+		opts.HarnessConfig = in.Config.HarnessConfig
+		opts.HarnessAuth = in.Config.HarnessAuth
+		opts.Task = in.Config.Task
+		opts.Workspace = in.Config.Workspace
+		opts.Profile = in.Config.Profile
+		opts.Branch = in.Config.Branch
+	}
+
+	if in.InlineConfig != nil {
+		opts.InlineConfig = in.InlineConfig
+	}
+
+	if len(in.SharedDirs) > 0 {
+		opts.SharedDirs = in.SharedDirs
+	}
+
+	// Save template slug before hydration may replace opts.Template
+	templateSlug := ""
+	if in.Config != nil {
+		templateSlug = in.Config.Template
+	}
+
+	// --- Template hydration ---
+	var hubConn *HubConnection
+	if in.HTTPRequest != nil {
+		hubConn = s.resolveHubConnection(in.HTTPRequest)
+	}
+	if hubConn != nil && in.Config != nil {
+		templatePath, err := s.hydrateTemplate(ctx, in.Config, hubConn)
+		if err != nil {
+			return nil, &startContextError{
+				Status:       http.StatusInternalServerError,
+				Message:      "Failed to hydrate template: " + err.Error(),
+				IsHubError:   true,
+				OriginalErr:  err,
+			}
+		}
+		if templatePath != "" {
+			opts.Template = templatePath
+			if s.config.Debug {
+				s.agentLifecycleLog.Debug("Using hydrated template", "agent_id", in.AgentID, "path", templatePath)
+			}
+		}
+	}
+
+	if templateSlug != "" {
+		opts.TemplateName = templateSlug
+	}
+
+	// --- Git clone mode ---
+	if in.Config != nil && in.Config.GitClone != nil {
+		gc := in.Config.GitClone
+		env["SCION_GIT_CLONE_URL"] = gc.URL
+		if gc.Branch != "" {
+			env["SCION_GIT_BRANCH"] = gc.Branch
+		}
+		if gc.Depth > 0 {
+			env["SCION_GIT_DEPTH"] = strconv.Itoa(gc.Depth)
+		}
+		if in.Config.Branch != "" {
+			env["SCION_AGENT_BRANCH"] = in.Config.Branch
+		}
+		opts.Workspace = ""
+		opts.GrovePath = ""
+		opts.GitClone = gc
+		if s.config.Debug {
+			s.agentLifecycleLog.Debug("Git clone mode enabled", "agent_id", in.AgentID,
+				"cloneURL", gc.URL, "branch", gc.Branch, "depth", gc.Depth)
+		}
+	}
+
+	// --- Env + telemetry + secrets ---
+	opts.Env = env
+
+	if v, ok := env["SCION_TELEMETRY_ENABLED"]; ok {
+		enabled := v == "true" || v == "1"
+		opts.TelemetryOverride = &enabled
+	}
+
+	if len(in.ResolvedSecrets) > 0 {
+		opts.ResolvedSecrets = in.ResolvedSecrets
+		if s.config.Debug {
+			s.envSecretLog.Debug("Received resolved secrets", "count", len(in.ResolvedSecrets))
+		}
+	}
+
+	// --- Manager resolution ---
+	mgr := s.resolveManagerForOpts(opts)
+
+	return &startContext{
+		Opts:         opts,
+		TemplateSlug: templateSlug,
+		Manager:      mgr,
+	}, nil
+}
+
+// startContextError is returned by buildStartContext for errors that need
+// specific HTTP status codes or special handling (e.g. hub connectivity).
+type startContextError struct {
+	Status      int
+	Message     string
+	IsHubError  bool
+	OriginalErr error
+}
+
+func (e *startContextError) Error() string {
+	return e.Message
+}

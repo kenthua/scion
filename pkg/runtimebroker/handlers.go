@@ -317,9 +317,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// For hub-native groves (GroveSlug set, no local provider path), resolve
-	// the conventional grove path (~/.scion/groves/<slug>/) early so that
-	// hub endpoint resolution and env-gather can load settings correctly.
+	// Resolve grove path early for env-gather (needs settings access before buildStartContext)
 	if req.GroveSlug != "" && req.GrovePath == "" {
 		globalDir, err := config.GetGlobalDir()
 		if err != nil {
@@ -328,128 +326,25 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.GrovePath = filepath.Join(globalDir, "groves", req.GroveSlug)
-		// Ensure the .scion project structure exists within the grove path.
-		// The Hub's initHubNativeGrove creates this on the Hub's filesystem,
-		// but on a different broker the directory may not exist yet. Without it,
-		// ResolveGrovePath won't find the .scion subdirectory and agents will
-		// be created at the wrong level (groves/<slug>/agents instead of
-		// groves/<slug>/.scion/agents).
-		scionDir := filepath.Join(req.GrovePath, ".scion")
-		if _, err := os.Stat(scionDir); os.IsNotExist(err) {
-			if err := config.InitProject(scionDir, nil); err != nil {
-				s.agentLifecycleLog.Warn("Failed to initialize .scion project for hub-native grove",
-					"agent_id", req.ID, "slug", req.GroveSlug, "path", scionDir, "error", err)
-			}
-		}
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("Resolved hub-native grove path from slug",
-				"agent_id", req.ID, "slug", req.GroveSlug,
-				"path", req.GrovePath,
-			)
-		}
 	}
 
-	// Build merged environment:
-	// 1. Start with resolvedEnv (from Hub, contains user/grove/broker vars and secrets)
-	// 2. Override with config.Env (explicitly set in request)
-	// 3. Add Hub authentication credentials if provided
-	env := make(map[string]string)
-
-	// First, apply resolved env from Hub (if present)
-	if len(req.ResolvedEnv) > 0 {
+	// Env-gather: if GatherEnv is true, evaluate env completeness before building full context.
+	// This needs the resolved grove path and merged env to determine which keys are missing.
+	if req.GatherEnv {
+		// Build a preliminary merged env for env-gather evaluation
+		env := make(map[string]string)
 		for k, v := range req.ResolvedEnv {
 			env[k] = v
 		}
-	}
-
-	// Then, apply config.Env (takes precedence over resolvedEnv)
-	if req.Config != nil && len(req.Config.Env) > 0 {
-		for _, e := range req.Config.Env {
-			parts := strings.SplitN(e, "=", 2)
-			if len(parts) == 2 {
-				env[parts[0]] = parts[1]
+		if req.Config != nil {
+			for _, e := range req.Config.Env {
+				parts := strings.SplitN(e, "=", 2)
+				if len(parts) == 2 {
+					env[parts[0]] = parts[1]
+				}
 			}
 		}
-	}
 
-	// Add Hub authentication credentials for the agent.
-	// Uses SCION_AUTH_TOKEN as the generic agent-to-hub auth token.
-	// Priority: explicit agent token from dispatcher > broker's own auth token.
-	if agentToken := req.AgentToken; agentToken != "" {
-		env["SCION_AUTH_TOKEN"] = agentToken
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("SCION_AUTH_TOKEN set from agent token", "agent_id", req.ID, "length", len(agentToken))
-		}
-	} else if devToken := os.Getenv("SCION_AUTH_TOKEN"); devToken != "" {
-		env["SCION_AUTH_TOKEN"] = devToken
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("SCION_AUTH_TOKEN set from broker env", "agent_id", req.ID, "length", len(devToken))
-		}
-	}
-	runtimeName := ""
-	if s.runtime != nil {
-		runtimeName = s.runtime.Name()
-	}
-	hubEndpoint := resolveHubEndpointForCreate(
-		req.HubEndpoint,
-		s.resolveHubEndpointFromRequest(r),
-		s.config.HubEndpoint,
-		req.ResolvedEnv,
-		req.GrovePath,
-		s.config.ContainerHubEndpoint,
-		runtimeName,
-	)
-	if hubEndpoint != "" {
-		env["SCION_HUB_ENDPOINT"] = hubEndpoint
-		env["SCION_HUB_URL"] = hubEndpoint // legacy compat
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("SCION_HUB_ENDPOINT set", "agent_id", req.ID, "endpoint", hubEndpoint)
-		}
-	}
-	if req.Slug != "" {
-		env["SCION_AGENT_SLUG"] = req.Slug
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("SCION_AGENT_SLUG set", "agent_id", req.ID, "slug", req.Slug)
-		}
-	}
-	if req.ID != "" {
-		env["SCION_AGENT_ID"] = req.ID
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("SCION_AGENT_ID set", "agent_id", req.ID, "id", req.ID)
-		}
-	}
-	if req.GroveID != "" {
-		env["SCION_GROVE_ID"] = req.GroveID
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("SCION_GROVE_ID set", "agent_id", req.ID, "id", req.GroveID)
-		}
-	}
-
-	if s.config.BrokerName != "" {
-		env["SCION_BROKER_NAME"] = s.config.BrokerName
-	}
-	if s.config.BrokerID != "" {
-		env["SCION_BROKER_ID"] = s.config.BrokerID
-	}
-	if req.CreatorName != "" {
-		env["SCION_CREATOR"] = req.CreatorName
-	}
-
-	// Pass debug mode to the container so sciontool logs debug info
-	if s.config.Debug {
-		env["SCION_DEBUG"] = "1"
-	}
-
-	// Debug log final env count
-	if s.config.Debug {
-		s.agentLifecycleLog.Debug("Final environment count", "agent_id", req.ID, "count", len(env))
-		for k, v := range env {
-			s.agentLifecycleLog.Debug("  ENV", "agent_id", req.ID, "key", k, "value", redactEnvValueForLog(k, v))
-		}
-	}
-
-	// Env-gather: if GatherEnv is true, evaluate env completeness
-	if req.GatherEnv {
 		required, secretInfo := s.extractRequiredEnvKeys(req)
 		if s.config.Debug {
 			s.envSecretLog.Debug("Env-gather: evaluating env completeness",
@@ -492,14 +387,8 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			for _, key := range required {
 				val, hasVal := env[key]
 				if hasVal && val != "" {
-					// Determine source
-					if _, fromHub := req.ResolvedEnv[key]; fromHub {
-						hubHas = append(hubHas, key)
-					} else {
-						hubHas = append(hubHas, key)
-					}
+					hubHas = append(hubHas, key)
 				} else if _, fromSecret := secretTargets[key]; fromSecret {
-					// Key will be projected from a resolved secret at container start
 					hubHas = append(hubHas, key)
 				} else {
 					needs = append(needs, key)
@@ -566,40 +455,6 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	opts := api.StartOptions{
-		Name:       req.Name,
-		BrokerMode: true,
-		Detached:   boolPtr(!req.Attach),
-		GrovePath:  req.GrovePath,
-	}
-
-	if req.Config != nil {
-		opts.Template = req.Config.Template
-		opts.Image = req.Config.Image
-		opts.HarnessConfig = req.Config.HarnessConfig
-		opts.HarnessAuth = req.Config.HarnessAuth
-		opts.Task = req.Config.Task
-		opts.Workspace = req.Config.Workspace
-		opts.Profile = req.Config.Profile
-		opts.Branch = req.Config.Branch
-	}
-
-	// Pass through inline ScionConfig for provisioning
-	if req.InlineConfig != nil {
-		opts.InlineConfig = req.InlineConfig
-	}
-
-	// Pass through grove-level shared directories
-	if len(req.SharedDirs) > 0 {
-		opts.SharedDirs = req.SharedDirs
-	}
-
-	// Save template slug before hydration may replace opts.Template with a cache path
-	templateSlug := ""
-	if req.Config != nil {
-		templateSlug = req.Config.Template
-	}
-
 	// Debug log grove path
 	if s.config.Debug && req.GrovePath != "" {
 		s.agentLifecycleLog.Debug("Using grove path from Hub", "agent_id", req.ID, "path", req.GrovePath)
@@ -616,74 +471,39 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hydrate template if Hub mode is enabled and template info is provided
-	hubConn := s.resolveHubConnection(r)
-	if hubConn != nil && req.Config != nil {
-		templatePath, err := s.hydrateTemplate(ctx, req.Config, hubConn)
-		if err != nil {
-			markAttemptFailed(http.StatusInternalServerError, "failed to hydrate template")
-			// Check if it's a Hub connectivity error
-			if templatecache.IsHubConnectivityError(err) {
-				HubUnreachableError(w, err.Error())
+	// Build unified start context (grove path, env, template, git-clone, secrets, manager)
+	sc, err := s.buildStartContext(ctx, startContextInputs{
+		Name:            req.Name,
+		AgentID:         req.ID,
+		Slug:            req.Slug,
+		GrovePath:       req.GrovePath,
+		GroveSlug:       req.GroveSlug,
+		GroveID:         req.GroveID,
+		Config:          req.Config,
+		InlineConfig:    req.InlineConfig,
+		SharedDirs:      req.SharedDirs,
+		HubEndpoint:     req.HubEndpoint,
+		AgentToken:      req.AgentToken,
+		CreatorName:     req.CreatorName,
+		ResolvedEnv:     req.ResolvedEnv,
+		ResolvedSecrets: req.ResolvedSecrets,
+		Attach:          req.Attach,
+		HTTPRequest:     r,
+	})
+	if err != nil {
+		markAttemptFailed(http.StatusInternalServerError, err.Error())
+		if sce, ok := err.(*startContextError); ok && sce.IsHubError {
+			if templatecache.IsHubConnectivityError(sce.OriginalErr) {
+				HubUnreachableError(w, sce.OriginalErr.Error())
 				return
 			}
-			TemplateError(w, "Failed to hydrate template: "+err.Error())
+			TemplateError(w, err.Error())
 			return
 		}
-		if templatePath != "" {
-			opts.Template = templatePath
-			if s.config.Debug {
-				s.agentLifecycleLog.Debug("Using hydrated template", "agent_id", req.ID, "path", templatePath)
-			}
-		}
+		RuntimeError(w, err.Error())
+		return
 	}
-
-	// Preserve human-friendly template slug for container labels
-	if templateSlug != "" {
-		opts.TemplateName = templateSlug
-	}
-
-	// Git clone mode: inject env vars and skip workspace mounting.
-	if req.Config != nil && req.Config.GitClone != nil {
-		gc := req.Config.GitClone
-		env["SCION_GIT_CLONE_URL"] = gc.URL
-		if gc.Branch != "" {
-			env["SCION_GIT_BRANCH"] = gc.Branch
-		}
-		if gc.Depth > 0 {
-			env["SCION_GIT_DEPTH"] = strconv.Itoa(gc.Depth)
-		}
-		// Pass user-specified agent branch name for the feature branch
-		if req.Config.Branch != "" {
-			env["SCION_AGENT_BRANCH"] = req.Config.Branch
-		}
-		opts.Workspace = ""
-		opts.GrovePath = ""
-		opts.GitClone = gc
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("Git clone mode enabled", "agent_id", req.ID,
-				"cloneURL", gc.URL, "branch", gc.Branch, "depth", gc.Depth)
-		}
-	}
-
-	// Always set env (may be empty, which is fine)
-	opts.Env = env
-
-	// Translate SCION_TELEMETRY_ENABLED from the merged env into the
-	// TelemetryOverride field so that Start() uses it as a proper override
-	// (enabling harness telemetry env injection and cloud config merging).
-	if v, ok := env["SCION_TELEMETRY_ENABLED"]; ok {
-		enabled := v == "true" || v == "1"
-		opts.TelemetryOverride = &enabled
-	}
-
-	// Pass through resolved secrets from the Hub
-	if len(req.ResolvedSecrets) > 0 {
-		opts.ResolvedSecrets = req.ResolvedSecrets
-		if s.config.Debug {
-			s.envSecretLog.Debug("Received resolved secrets from Hub", "count", len(req.ResolvedSecrets))
-		}
-	}
+	opts := sc.Opts
 
 	// If WorkspaceStoragePath is set, download workspace from GCS (non-git bootstrap)
 	if req.WorkspaceStoragePath != "" {
@@ -741,12 +561,10 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	mgr := s.resolveManagerForOpts(opts)
-
 	// Branch based on provision-only flag
 	if req.ProvisionOnly {
 		// Provision only: set up dirs, worktree, templates without starting the container
-		cfg, err := mgr.Provision(ctx, opts)
+		cfg, err := sc.Manager.Provision(ctx, opts)
 		if err != nil {
 			markAttemptFailed(http.StatusInternalServerError, "failed to provision agent")
 			RuntimeError(w, "Failed to provision agent: "+err.Error())
@@ -783,13 +601,10 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Full start: provision and launch the container
-	agentInfo, err := mgr.Start(ctx, opts)
+	agentInfo, err := sc.Manager.Start(ctx, opts)
 	if err != nil {
 		markAttemptFailed(http.StatusInternalServerError, "failed to create agent")
 		// Clean up provisioned agent files so they don't become orphans.
-		// In hub mode the hub will delete its agent record on dispatch failure,
-		// leaving no retry path — orphaned local files would trigger spurious
-		// sync-registration attempts on the next CLI list.
 		if opts.GrovePath != "" {
 			if _, cleanupErr := agent.DeleteAgentFiles(opts.Name, opts.GrovePath, true); cleanupErr != nil {
 				s.agentLifecycleLog.Warn("Failed to clean up agent files after start failure",
@@ -1026,105 +841,39 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 
 	s.agentLifecycleLog.Debug("startAgent called", "agent_id", id, "task", startReq.Task, "grovePath", startReq.GrovePath, "groveSlug", startReq.GroveSlug, "harnessConfig", startReq.HarnessConfig, "resolvedEnvCount", len(startReq.ResolvedEnv))
 
-	// For hub-native groves (GroveSlug set, no local provider path), resolve
-	// the conventional grove path (~/.scion/groves/<slug>/) so the agent is
-	// started in the correct location instead of the broker's local grove.
-	if startReq.GroveSlug != "" && startReq.GrovePath == "" {
-		globalDir, err := config.GetGlobalDir()
-		if err != nil {
-			RuntimeError(w, "Failed to get global dir: "+err.Error())
-			return
-		}
-		startReq.GrovePath = filepath.Join(globalDir, "groves", startReq.GroveSlug)
-		// Ensure the .scion project structure exists within the grove path.
-		// See corresponding comment in createAgent for full explanation.
-		scionDir := filepath.Join(startReq.GrovePath, ".scion")
-		if _, err := os.Stat(scionDir); os.IsNotExist(err) {
-			if err := config.InitProject(scionDir, nil); err != nil {
-				s.agentLifecycleLog.Warn("Failed to initialize .scion project for hub-native grove",
-					"agent_id", id, "slug", startReq.GroveSlug, "path", scionDir, "error", err)
-			}
-		}
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("Resolved hub-native grove path from slug in startAgent",
-				"agent_id", id, "slug", startReq.GroveSlug,
-				"path", startReq.GrovePath,
-			)
+	// Build config for buildStartContext (startAgent uses a subset of CreateAgentConfig)
+	var cfg *CreateAgentConfig
+	if startReq.Task != "" || startReq.HarnessConfig != "" || len(startReq.SharedDirs) > 0 {
+		cfg = &CreateAgentConfig{
+			Task:          startReq.Task,
+			HarnessConfig: startReq.HarnessConfig,
+			SharedDirs:    startReq.SharedDirs,
 		}
 	}
 
-	// Build start options
-	opts := api.StartOptions{
-		Name:          id,
-		BrokerMode:    true,
-		Task:          startReq.Task,
-		HarnessConfig: startReq.HarnessConfig,
-		SharedDirs:    startReq.SharedDirs,
+	sc, err := s.buildStartContext(ctx, startContextInputs{
+		Name:            id,
+		GrovePath:       startReq.GrovePath,
+		GroveSlug:       startReq.GroveSlug,
+		Config:          cfg,
+		ResolvedEnv:     startReq.ResolvedEnv,
+		ResolvedSecrets: startReq.ResolvedSecrets,
+		SharedDirs:      startReq.SharedDirs,
+		HTTPRequest:     r,
+	})
+	if err != nil {
+		RuntimeError(w, err.Error())
+		return
 	}
+	opts := sc.Opts
 
-	// Apply resolved env vars from Hub (API keys, secrets, etc.)
-	if len(startReq.ResolvedEnv) > 0 {
-		opts.Env = make(map[string]string, len(startReq.ResolvedEnv))
-		for k, v := range startReq.ResolvedEnv {
-			opts.Env[k] = v
-		}
-		if s.config.Debug {
-			s.agentLifecycleLog.Debug("startAgent: applied resolved env from hub", "agent_id", id, "count", len(startReq.ResolvedEnv))
-		}
-	}
-
-	// Translate SCION_TELEMETRY_ENABLED from hub-resolved env into the
-	// TelemetryOverride field so that Start() uses it as a proper override
-	// (enabling harness telemetry env injection and cloud config merging).
-	if v, ok := startReq.ResolvedEnv["SCION_TELEMETRY_ENABLED"]; ok {
-		enabled := v == "true" || v == "1"
-		opts.TelemetryOverride = &enabled
-	}
-
-	// Apply broker-level env enrichment (hub endpoint, broker name, debug)
-	if opts.Env == nil {
-		opts.Env = make(map[string]string)
-	}
-	grovePathForFallback := startReq.GrovePath
-	if grovePathForFallback == "" {
-		grovePathForFallback = opts.GrovePath
-	}
-	runtimeName := ""
-	if s.runtime != nil {
-		runtimeName = s.runtime.Name()
-	}
-	hubEndpoint := resolveHubEndpointForStart(
-		s.config.HubEndpoint,
-		startReq.ResolvedEnv,
-		grovePathForFallback,
-		s.config.ContainerHubEndpoint,
-		runtimeName,
-	)
-	if hubEndpoint != "" {
-		opts.Env["SCION_HUB_ENDPOINT"] = hubEndpoint
-		opts.Env["SCION_HUB_URL"] = hubEndpoint
-	}
-	if s.config.BrokerName != "" {
-		opts.Env["SCION_BROKER_NAME"] = s.config.BrokerName
-	}
-	if s.config.BrokerID != "" {
-		opts.Env["SCION_BROKER_ID"] = s.config.BrokerID
-	}
-	if s.config.Debug {
-		opts.Env["SCION_DEBUG"] = "1"
-	}
-
-	// Use grove path from request if provided
-	if startReq.GrovePath != "" {
-		opts.GrovePath = startReq.GrovePath
-	} else {
-		// Fall back to looking up grove path from an existing container
+	// If grove path wasn't in the request, fall back to looking up from an existing container
+	if startReq.GrovePath == "" && startReq.GroveSlug == "" && opts.GrovePath == "" {
 		agents, err := s.manager.List(ctx, map[string]string{"scion.agent": "true"})
 		if err != nil {
 			RuntimeError(w, "Failed to list agents: "+err.Error())
 			return
 		}
-
 		for i := range agents {
 			if agents[i].Name == id || agents[i].ContainerID == id || agents[i].Slug == id {
 				if agents[i].GrovePath != "" {
@@ -1135,17 +884,7 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 
-	// Pass through resolved secrets from the Hub (file-type secrets for auth, etc.)
-	if len(startReq.ResolvedSecrets) > 0 {
-		opts.ResolvedSecrets = startReq.ResolvedSecrets
-		if s.config.Debug {
-			s.envSecretLog.Debug("Received resolved secrets from Hub in startAgent", "count", len(startReq.ResolvedSecrets))
-		}
-	}
-
 	// Apply updated InlineConfig to scion-agent.json before starting.
-	// This handles config changes made via the Hub PATCH endpoint after
-	// initial provisioning (e.g. max_turns set in the web configure form).
 	if startReq.InlineConfig != nil && opts.GrovePath != "" {
 		s.applyInlineConfigUpdate(id, opts.GrovePath, startReq.InlineConfig)
 	}
@@ -1155,6 +894,7 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 		opts.Profile = agent.GetSavedProfile(id, opts.GrovePath)
 	}
 
+	// Re-resolve manager after profile update
 	mgr := s.resolveManagerForOpts(opts)
 	agentInfo, err := mgr.Start(ctx, opts)
 	if err != nil {
@@ -1163,19 +903,7 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 	}
 
 	// Send an immediate heartbeat so the hub gets the updated container status
-	// without waiting for the next periodic heartbeat interval.
-	s.hubMu.RLock()
-	for _, conn := range s.hubConnections {
-		if conn.Heartbeat != nil {
-			hb := conn.Heartbeat
-			go func() {
-				if err := hb.ForceHeartbeat(context.Background()); err != nil {
-					s.agentLifecycleLog.Error("Failed to send forced heartbeat after start", "agent_id", id, "error", err)
-				}
-			}()
-		}
-	}
-	s.hubMu.RUnlock()
+	s.forceHeartbeatAll("start", id)
 
 	agentResp := AgentInfoToResponse(*agentInfo)
 	writeJSON(w, http.StatusAccepted, CreateAgentResponse{
@@ -1254,21 +982,7 @@ func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 
-	// Send an immediate heartbeat so the hub gets the updated container status
-	// without waiting for the next periodic heartbeat interval.
-	// In multi-hub mode, force heartbeat on all connections.
-	s.hubMu.RLock()
-	for _, conn := range s.hubConnections {
-		if conn.Heartbeat != nil {
-			hb := conn.Heartbeat
-			go func() {
-				if err := hb.ForceHeartbeat(context.Background()); err != nil {
-					s.agentLifecycleLog.Error("Failed to send forced heartbeat after stop", "agent_id", id, "error", err)
-				}
-			}()
-		}
-	}
-	s.hubMu.RUnlock()
+	s.forceHeartbeatAll("stop", id)
 
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"status":  "accepted",
@@ -1279,52 +993,33 @@ func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id string) {
 func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
-	opts := api.StartOptions{
-		Name:       id,
-		BrokerMode: true,
-	}
+	// Look up agent to get its name and grove path
+	agentName := id
+	var grovePath string
 	agents, err := s.manager.List(ctx, map[string]string{"scion.agent": "true"})
 	if err == nil {
 		for i := range agents {
 			if agents[i].Name == id || agents[i].ContainerID == id || agents[i].Slug == id {
-				opts.Name = agents[i].Name
-				opts.GrovePath = agents[i].GrovePath
+				agentName = agents[i].Name
+				grovePath = agents[i].GrovePath
 				break
 			}
 		}
 	}
 
+	sc, err := s.buildStartContext(ctx, startContextInputs{
+		Name:        agentName,
+		GrovePath:   grovePath,
+		HTTPRequest: r,
+	})
+	if err != nil {
+		RuntimeError(w, err.Error())
+		return
+	}
+	opts := sc.Opts
+
 	if opts.GrovePath != "" {
 		opts.Profile = agent.GetSavedProfile(id, opts.GrovePath)
-	}
-
-	// Enrich with broker-level env vars (hub endpoint, broker name, debug)
-	if opts.Env == nil {
-		opts.Env = make(map[string]string)
-	}
-	runtimeName := ""
-	if s.runtime != nil {
-		runtimeName = s.runtime.Name()
-	}
-	hubEndpoint := resolveHubEndpointForStart(
-		s.config.HubEndpoint,
-		nil,
-		opts.GrovePath,
-		s.config.ContainerHubEndpoint,
-		runtimeName,
-	)
-	if hubEndpoint != "" {
-		opts.Env["SCION_HUB_ENDPOINT"] = hubEndpoint
-		opts.Env["SCION_HUB_URL"] = hubEndpoint
-	}
-	if s.config.BrokerName != "" {
-		opts.Env["SCION_BROKER_NAME"] = s.config.BrokerName
-	}
-	if s.config.BrokerID != "" {
-		opts.Env["SCION_BROKER_ID"] = s.config.BrokerID
-	}
-	if s.config.Debug {
-		opts.Env["SCION_DEBUG"] = "1"
 	}
 
 	// Stop then start — tolerate stop errors since the container may already
@@ -1333,12 +1028,11 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string)
 		if isContainerStopTolerable(err) {
 			s.agentLifecycleLog.Warn("Restart: stop target not found or already stopped, proceeding with start", "agent_id", id, "error", err)
 		} else {
-			// Log but proceed with start — the start will delete and
-			// recreate the container regardless of its current state.
 			s.agentLifecycleLog.Warn("Restart: stop failed, proceeding with start anyway", "agent_id", id, "error", err)
 		}
 	}
 
+	// Re-resolve manager after profile update
 	mgr := s.resolveManagerForOpts(opts)
 	agentInfo, err := mgr.Start(ctx, opts)
 	if err != nil {
@@ -1350,19 +1044,7 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	// Send an immediate heartbeat so the hub gets the updated container status
-	s.hubMu.RLock()
-	for _, conn := range s.hubConnections {
-		if conn.Heartbeat != nil {
-			hb := conn.Heartbeat
-			go func() {
-				if err := hb.ForceHeartbeat(context.Background()); err != nil {
-					s.agentLifecycleLog.Error("Failed to send forced heartbeat after restart", "agent_id", id, "error", err)
-				}
-			}()
-		}
-	}
-	s.hubMu.RUnlock()
+	s.forceHeartbeatAll("restart", id)
 
 	agentResp := AgentInfoToResponse(*agentInfo)
 	writeJSON(w, http.StatusAccepted, CreateAgentResponse{
@@ -1914,23 +1596,32 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 		s.envSecretLog.Debug("Finalize-env: merging gathered env", "gatheredKeys", len(req.Env), "totalEnv", len(pending.MergedEnv))
 	}
 
-	// Build start options from the pending request
 	origReq := pending.Request
-	opts := api.StartOptions{
-		Name:       origReq.Name,
-		BrokerMode: true,
-		Detached:   boolPtr(!origReq.Attach),
-		GrovePath:  origReq.GrovePath,
-	}
 
-	if origReq.Config != nil {
-		opts.Template = origReq.Config.Template
-		opts.Image = origReq.Config.Image
-		opts.HarnessConfig = origReq.Config.HarnessConfig
-		opts.Task = origReq.Config.Task
-		opts.Workspace = origReq.Config.Workspace
-		opts.Profile = origReq.Config.Profile
+	// Build unified start context from the original pending request + merged env
+	sc, err := s.buildStartContext(ctx, startContextInputs{
+		Name:            origReq.Name,
+		AgentID:         origReq.ID,
+		Slug:            origReq.Slug,
+		GrovePath:       origReq.GrovePath,
+		GroveSlug:       origReq.GroveSlug,
+		GroveID:         origReq.GroveID,
+		Config:          origReq.Config,
+		InlineConfig:    origReq.InlineConfig,
+		SharedDirs:      origReq.SharedDirs,
+		HubEndpoint:     origReq.HubEndpoint,
+		AgentToken:      origReq.AgentToken,
+		CreatorName:     origReq.CreatorName,
+		ResolvedEnv:     pending.MergedEnv,
+		ResolvedSecrets: origReq.ResolvedSecrets,
+		Attach:          origReq.Attach,
+		HTTPRequest:     r,
+	})
+	if err != nil {
+		TemplateError(w, err.Error())
+		return
 	}
+	opts := sc.Opts
 
 	if s.config.Debug {
 		s.envSecretLog.Debug("Finalize-env: StartOptions built from pending request",
@@ -1944,65 +1635,8 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 		)
 	}
 
-	// Save template slug before hydration may replace opts.Template with a cache path
-	templateSlug := ""
-	if origReq.Config != nil {
-		templateSlug = origReq.Config.Template
-	}
-
-	// Hydrate template if needed
-	hubConn := s.resolveHubConnection(r)
-	if hubConn != nil && origReq.Config != nil {
-		templatePath, err := s.hydrateTemplate(ctx, origReq.Config, hubConn)
-		if err != nil {
-			TemplateError(w, "Failed to hydrate template: "+err.Error())
-			return
-		}
-		if templatePath != "" {
-			opts.Template = templatePath
-		}
-	}
-
-	// Preserve human-friendly template slug for container labels
-	if templateSlug != "" {
-		opts.TemplateName = templateSlug
-	}
-
-	// Git clone mode
-	if origReq.Config != nil && origReq.Config.GitClone != nil {
-		gc := origReq.Config.GitClone
-		pending.MergedEnv["SCION_GIT_CLONE_URL"] = gc.URL
-		if gc.Branch != "" {
-			pending.MergedEnv["SCION_GIT_BRANCH"] = gc.Branch
-		}
-		if gc.Depth > 0 {
-			pending.MergedEnv["SCION_GIT_DEPTH"] = strconv.Itoa(gc.Depth)
-		}
-		// Pass user-specified agent branch name for the feature branch
-		if origReq.Config.Branch != "" {
-			pending.MergedEnv["SCION_AGENT_BRANCH"] = origReq.Config.Branch
-		}
-		opts.Workspace = ""
-		opts.GrovePath = ""
-		opts.GitClone = gc
-	}
-
-	opts.Env = pending.MergedEnv
-
-	// Translate SCION_TELEMETRY_ENABLED into TelemetryOverride (same as createAgent/startAgent).
-	if v, ok := pending.MergedEnv["SCION_TELEMETRY_ENABLED"]; ok {
-		enabled := v == "true" || v == "1"
-		opts.TelemetryOverride = &enabled
-	}
-
-	// Pass through resolved secrets
-	if len(origReq.ResolvedSecrets) > 0 {
-		opts.ResolvedSecrets = origReq.ResolvedSecrets
-	}
-
 	// Start the agent
-	mgr := s.resolveManagerForOpts(opts)
-	agentInfo, err := mgr.Start(ctx, opts)
+	agentInfo, err := sc.Manager.Start(ctx, opts)
 	if err != nil {
 		// Keep pending state for retry on transient start failures.
 		s.pendingEnvGatherMu.Lock()
@@ -2084,6 +1718,23 @@ func resolveGroveSettingsDir(grovePath string) string {
 		return candidate
 	}
 	return grovePath // fallback to original
+}
+
+// forceHeartbeatAll sends an immediate heartbeat on all hub connections so the
+// hub gets updated container status without waiting for the next periodic interval.
+func (s *Server) forceHeartbeatAll(action, agentID string) {
+	s.hubMu.RLock()
+	defer s.hubMu.RUnlock()
+	for _, conn := range s.hubConnections {
+		if conn.Heartbeat != nil {
+			hb := conn.Heartbeat
+			go func() {
+				if err := hb.ForceHeartbeat(context.Background()); err != nil {
+					s.agentLifecycleLog.Error("Failed to send forced heartbeat after "+action, "agent_id", agentID, "error", err)
+				}
+			}()
+		}
+	}
 }
 
 func boolPtr(b bool) *bool {
