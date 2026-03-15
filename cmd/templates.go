@@ -648,15 +648,12 @@ var templatesSyncCmd = &cobra.Command{
 	Use:   "sync [template]",
 	Short: "Create or update a template in the Hub (Hub only)",
 	Long: `Sync a local template to the Hub. Creates the template if it doesn't exist,
-or updates it if it does. This is an upsert operation.
+or updates it with any changed files if it does.
 
 The harness type is automatically detected from the template's configuration file.
 Use the root --global flag to sync to global scope instead of grove scope.
 
 Use --all to sync all grove-scoped local templates to the Hub at once.
-Use --force to overwrite existing Hub templates even when they already exist
-(by default, a conflict warning is shown for templates that already exist on the Hub
-with different content).
 
 Examples:
   # Sync a local template to the Hub (grove scope by default)
@@ -669,10 +666,7 @@ Examples:
   scion --global templates sync custom-claude
 
   # Sync with a different name on the Hub
-  scion templates sync custom-claude --name my-team-claude
-
-  # Force overwrite of existing Hub template
-  scion templates sync custom-claude --force`,
+  scion templates sync custom-claude --name my-team-claude`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runTemplateSync,
 }
@@ -700,11 +694,10 @@ Examples:
 func runTemplateSync(cmd *cobra.Command, args []string) error {
 	// Get flags - handle nil cmd for testing
 	var hubName string
-	var syncAll, force bool
+	var syncAll bool
 	if cmd != nil {
 		hubName, _ = cmd.Flags().GetString("name")
 		syncAll, _ = cmd.Flags().GetBool("all")
-		force, _ = cmd.Flags().GetBool("force")
 	}
 
 	// Validate args: either --all or a template name is required
@@ -736,7 +729,7 @@ func runTemplateSync(cmd *cobra.Command, args []string) error {
 	}
 
 	if syncAll {
-		return syncAllTemplatesToHub(hubCtx, destScope, force)
+		return syncAllTemplatesToHub(hubCtx, destScope)
 	}
 
 	localTemplateName := args[0]
@@ -771,11 +764,11 @@ func runTemplateSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read template config: %w", err)
 	}
 
-	return syncTemplateToHub(hubCtx, hubName, tpl.Path, destScope, harnessType, force)
+	return syncTemplateToHub(hubCtx, hubName, tpl.Path, destScope, harnessType)
 }
 
 // syncAllTemplatesToHub syncs all local grove templates to the Hub.
-func syncAllTemplatesToHub(hubCtx *HubContext, scope string, force bool) error {
+func syncAllTemplatesToHub(hubCtx *HubContext, scope string) error {
 	// Get local templates based on scope
 	localGlobal, localGrove, err := config.ListTemplatesGrouped()
 	if err != nil {
@@ -796,7 +789,7 @@ func syncAllTemplatesToHub(hubCtx *HubContext, scope string, force bool) error {
 
 	fmt.Printf("Syncing %d %s template(s) to Hub...\n", len(templates), scope)
 
-	var synced, skipped, failed int
+	var synced, failed int
 	for _, tpl := range templates {
 		harnessType, err := detectHarnessType(tpl)
 		if err != nil {
@@ -805,24 +798,16 @@ func syncAllTemplatesToHub(hubCtx *HubContext, scope string, force bool) error {
 			continue
 		}
 
-		err = syncTemplateToHub(hubCtx, tpl.Name, tpl.Path, scope, harnessType, force)
+		err = syncTemplateToHub(hubCtx, tpl.Name, tpl.Path, scope, harnessType)
 		if err != nil {
-			if strings.Contains(err.Error(), "already exists") {
-				fmt.Printf("  %s: skipped (conflict, use --force to overwrite)\n", tpl.Name)
-				skipped++
-			} else {
-				fmt.Printf("  %s: failed: %v\n", tpl.Name, err)
-				failed++
-			}
+			fmt.Printf("  %s: failed: %v\n", tpl.Name, err)
+			failed++
 			continue
 		}
 		synced++
 	}
 
 	fmt.Printf("\n%d template(s) synced", synced)
-	if skipped > 0 {
-		fmt.Printf(", %d skipped (conflicts)", skipped)
-	}
 	if failed > 0 {
 		fmt.Printf(", %d failed", failed)
 	}
@@ -969,10 +954,8 @@ func pullTemplateFromHubMatch(hubCtx *HubContext, match *TemplateMatch, toPath s
 }
 
 // syncTemplateToHub creates or updates a template in the Hub.
-// When force is false and a template with the same name already exists on the Hub
-// with different content, a conflict error is returned instead of overwriting.
-func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType string, force ...bool) error {
-	forceOverwrite := len(force) > 0 && force[0]
+// If a template with the same name already exists, only changed files are uploaded.
+func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -1086,16 +1069,7 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 				return nil
 			}
 
-			// Conflict detection: if content differs and force is not set, warn and abort
-			if !forceOverwrite {
-				localHash := computeLocalContentHash(files)
-				return fmt.Errorf("template '%s' already exists at %s scope on the Hub\n"+
-					"  (content hash mismatch: local=%s, hub=%s)\n"+
-					"Use --force to overwrite the existing template",
-					name, scope, truncateHash(localHash), truncateHash(existingTemplate.ContentHash))
-			}
-
-			fmt.Printf("Found %d changed file(s), updating template (--force)...\n", len(filesToUpload))
+			fmt.Printf("Found %d changed file(s), updating template...\n", len(filesToUpload))
 		}
 	} else {
 		// Create new template - upload all files
@@ -1456,12 +1430,10 @@ func init() {
 	// Flags for sync command (--global is inherited from root)
 	templatesSyncCmd.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 	templatesSyncCmd.Flags().Bool("all", false, "Sync all local templates to the Hub")
-	templatesSyncCmd.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 
 	// Flags for push command (same as sync, since push is an alias)
 	templatesPushCmd.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 	templatesPushCmd.Flags().Bool("all", false, "Push all local templates to the Hub")
-	templatesPushCmd.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 
 	// Flags for pull command
 	templatesPullCmd.Flags().String("to", "", "Destination path for downloaded template")
@@ -1518,7 +1490,6 @@ func init() {
 	}
 	syncAlias.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 	syncAlias.Flags().Bool("all", false, "Sync all local templates to the Hub")
-	syncAlias.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 	templateCmd.AddCommand(syncAlias)
 
 	pushAlias := &cobra.Command{
@@ -1529,7 +1500,6 @@ func init() {
 	}
 	pushAlias.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 	pushAlias.Flags().Bool("all", false, "Push all local templates to the Hub")
-	pushAlias.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 	templateCmd.AddCommand(pushAlias)
 
 	statusAlias := &cobra.Command{

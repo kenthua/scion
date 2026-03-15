@@ -304,7 +304,6 @@ func TestRunTemplateSync_AllAndArgConflict(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("name", "", "")
 	cmd.Flags().Bool("all", true, "")
-	cmd.Flags().Bool("force", false, "")
 
 	err := runTemplateSync(cmd, []string{"some-template"})
 	require.Error(t, err)
@@ -316,7 +315,6 @@ func TestRunTemplateSync_AllAndNameConflict(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("name", "custom-name", "")
 	cmd.Flags().Bool("all", true, "")
-	cmd.Flags().Bool("force", false, "")
 
 	err := runTemplateSync(cmd, []string{})
 	require.Error(t, err)
@@ -365,7 +363,7 @@ func newMockHubServerForSync(t *testing.T, groveID string, existingTemplates []m
 				},
 			})
 
-		case strings.HasSuffix(r.URL.Path, "/upload-urls") && r.Method == http.MethodPost:
+		case strings.HasSuffix(r.URL.Path, "/upload") && r.Method == http.MethodPost:
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"uploadUrls": []interface{}{},
 			})
@@ -384,7 +382,7 @@ func newMockHubServerForSync(t *testing.T, groveID string, existingTemplates []m
 	}))
 }
 
-func TestRunTemplateSync_ConflictDetection(t *testing.T) {
+func TestRunTemplateSync_UpdatesExistingTemplate(t *testing.T) {
 	orig := saveTemplateTestState()
 	defer orig.restore()
 
@@ -398,16 +396,16 @@ func TestRunTemplateSync_ConflictDetection(t *testing.T) {
 	noHub = false
 
 	// Create a local template
-	createTestTemplate(t, tmpHome, "conflict-tpl")
+	createTestTemplate(t, tmpHome, "update-tpl")
 
-	groveID := "grove-conflict-123"
+	groveID := "grove-update-123"
 
 	// Hub server returns an existing template with a different hash
 	server := newMockHubServerForSync(t, groveID, []map[string]interface{}{
 		{
 			"id":          "existing-tpl-id",
-			"name":        "conflict-tpl",
-			"slug":        "conflict-tpl",
+			"name":        "update-tpl",
+			"slug":        "update-tpl",
 			"scope":       "global",
 			"status":      "active",
 			"contentHash": "sha256:different-hash",
@@ -417,16 +415,13 @@ func TestRunTemplateSync_ConflictDetection(t *testing.T) {
 
 	grovePath = setupHubGrove(t, tmpHome, server.URL, groveID)
 
-	// Create the cobra command without --force
+	// Sync should succeed without --force when content differs
 	cmd := &cobra.Command{}
 	cmd.Flags().String("name", "", "")
 	cmd.Flags().Bool("all", false, "")
-	cmd.Flags().Bool("force", false, "")
 
-	err := runTemplateSync(cmd, []string{"conflict-tpl"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "already exists")
-	assert.Contains(t, err.Error(), "Use --force")
+	err := runTemplateSync(cmd, []string{"update-tpl"})
+	require.NoError(t, err)
 }
 
 func TestRunTemplateStatus_NoHub(t *testing.T) {
