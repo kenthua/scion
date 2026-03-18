@@ -232,6 +232,12 @@ func (s *Scheduler) loadPersistedTimers(ctx context.Context) {
 		if evt.FireAt.Before(now) || evt.FireAt.Equal(now) {
 			// Expired while Hub was down — execute immediately
 			expiredCount++
+			staleness := now.Sub(evt.FireAt)
+			s.log.Warn("Scheduler: recovering expired event from downtime",
+				"eventID", evt.ID,
+				"type", evt.EventType,
+				"scheduledFor", evt.FireAt.Format(time.RFC3339),
+				"staleness", staleness.Truncate(time.Second).String())
 			go s.fireEvent(ctx, evt, true)
 		} else {
 			// Schedule for the future

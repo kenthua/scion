@@ -17,6 +17,7 @@ package hub
 import (
 	"bufio"
 	"context"
+	"errors"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -1122,6 +1123,23 @@ func (s *Server) messageEventHandler() EventHandler {
 			return fmt.Errorf("message payload is empty")
 		}
 
+		// Log staleness for events that fired late (e.g. after server downtime)
+		staleness := time.Since(evt.FireAt)
+		if !evt.FireAt.IsZero() && staleness > 1*time.Minute {
+			slog.Warn("Scheduler: firing stale message event",
+				"eventID", evt.ID,
+				"agentName", payload.AgentName,
+				"agentID", payload.AgentID,
+				"scheduledFor", evt.FireAt.Format(time.RFC3339),
+				"staleness", staleness.Truncate(time.Second).String())
+		}
+
+		// Resolve the target agent name for logging
+		targetName := payload.AgentName
+		if targetName == "" {
+			targetName = payload.AgentID
+		}
+
 		// Resolve the agent
 		var agent *store.Agent
 		var err error
@@ -1133,7 +1151,16 @@ func (s *Server) messageEventHandler() EventHandler {
 			return fmt.Errorf("message payload must include agentId or agentName")
 		}
 		if err != nil {
-			return fmt.Errorf("failed to resolve agent: %w", err)
+			if errors.Is(err, store.ErrNotFound) {
+				slog.Warn("Scheduler: target agent no longer exists, dropping scheduled message",
+					"eventID", evt.ID,
+					"agentName", payload.AgentName,
+					"agentID", payload.AgentID,
+					"groveID", evt.GroveID,
+					"message", payload.Message)
+				return fmt.Errorf("target agent %q no longer exists", targetName)
+			}
+			return fmt.Errorf("failed to resolve agent %q: %w", targetName, err)
 		}
 
 		dispatcher := s.GetDispatcher()

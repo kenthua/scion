@@ -17,6 +17,7 @@ package hub
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -310,11 +311,13 @@ type mockScheduledEventStore struct {
 	store.Store // embed to satisfy the interface; unused methods panic
 	mu          sync.Mutex
 	events      map[string]*store.ScheduledEvent
+	agents      map[string]*store.Agent
 }
 
 func newMockStore() *mockScheduledEventStore {
 	return &mockScheduledEventStore{
 		events: make(map[string]*store.ScheduledEvent),
+		agents: make(map[string]*store.Agent),
 	}
 }
 
@@ -391,6 +394,30 @@ func (m *mockScheduledEventStore) ListScheduledEvents(_ context.Context, _ store
 
 func (m *mockScheduledEventStore) PurgeOldScheduledEvents(_ context.Context, _ time.Time) (int, error) {
 	return 0, nil
+}
+
+// Agent-related methods for message handler tests
+
+func (m *mockScheduledEventStore) GetAgent(_ context.Context, id string) (*store.Agent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if a, ok := m.agents[id]; ok {
+		cp := *a
+		return &cp, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockScheduledEventStore) GetAgentBySlug(_ context.Context, groveID, slug string) (*store.Agent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.agents {
+		if a.GroveID == groveID && a.Slug == slug {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, store.ErrNotFound
 }
 
 // getEvent returns an event by ID (test helper, no error).
@@ -905,6 +932,118 @@ func TestScheduleEventWithCancelledCallerContext(t *testing.T) {
 	}
 
 	s.Stop()
+}
+
+func TestExpiredEventsFromDowntimeStillFire(t *testing.T) {
+	// Simulate a server that was offline for a while: multiple events with
+	// fire_at in the past should all be recovered and executed on startup.
+	ms := newMockStore()
+	ctx := context.Background()
+
+	var fired atomic.Int32
+	now := time.Now()
+
+	// Create events that expired at different times during "downtime"
+	for i, staleness := range []time.Duration{5 * time.Minute, 2 * time.Hour, 24 * time.Hour} {
+		evt := store.ScheduledEvent{
+			ID:        fmt.Sprintf("downtime-%d", i),
+			GroveID:   "grove-1",
+			EventType: "message",
+			FireAt:    now.Add(-staleness),
+			Payload:   `{"msg":"recover me"}`,
+			Status:    store.ScheduledEventPending,
+		}
+		ms.CreateScheduledEvent(ctx, &evt)
+	}
+
+	s := newTestSchedulerWithStore(1*time.Second, ms)
+	s.RegisterEventHandler("message", func(_ context.Context, _ store.ScheduledEvent) error {
+		fired.Add(1)
+		return nil
+	})
+
+	serverCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Start(serverCtx)
+
+	// Wait for all expired events to fire
+	deadline := time.After(1 * time.Second)
+	for {
+		if fired.Load() >= 3 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected 3 expired events to fire, got %d", fired.Load())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// Verify all events were marked as expired (not just fired)
+	for i := 0; i < 3; i++ {
+		e := ms.getEvent(fmt.Sprintf("downtime-%d", i))
+		if e.Status != store.ScheduledEventExpired {
+			t.Errorf("event downtime-%d: expected status %q, got %q", i, store.ScheduledEventExpired, e.Status)
+		}
+	}
+
+	s.Stop()
+}
+
+func TestMessageEventHandler_AgentNotFound(t *testing.T) {
+	// When a message event fires for an agent that has been deleted,
+	// the handler should return a clear error indicating the agent
+	// no longer exists (not a generic "failed to resolve" error).
+	ms := newMockStore()
+
+	// Create a Server with the mock store — no agents registered
+	srv := &Server{store: ms}
+	handler := srv.messageEventHandler()
+
+	ctx := context.Background()
+
+	evt := store.ScheduledEvent{
+		ID:        "msg-no-agent-1",
+		GroveID:   "grove-1",
+		EventType: "message",
+		Payload:   `{"agentName":"deleted-agent","message":"hello?"}`,
+	}
+
+	err := handler(ctx, evt)
+	if err == nil {
+		t.Fatal("expected error when agent does not exist")
+	}
+	if !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("expected 'no longer exists' in error, got: %s", err)
+	}
+	if !strings.Contains(err.Error(), "deleted-agent") {
+		t.Errorf("expected agent name in error, got: %s", err)
+	}
+}
+
+func TestMessageEventHandler_AgentNotFoundByID(t *testing.T) {
+	ms := newMockStore()
+	srv := &Server{store: ms}
+	handler := srv.messageEventHandler()
+
+	ctx := context.Background()
+
+	evt := store.ScheduledEvent{
+		ID:        "msg-no-agent-2",
+		GroveID:   "grove-1",
+		EventType: "message",
+		Payload:   `{"agentId":"nonexistent-id","message":"hello?"}`,
+	}
+
+	err := handler(ctx, evt)
+	if err == nil {
+		t.Fatal("expected error when agent does not exist")
+	}
+	if !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("expected 'no longer exists' in error, got: %s", err)
+	}
 }
 
 func TestMultipleEventHandlers(t *testing.T) {
