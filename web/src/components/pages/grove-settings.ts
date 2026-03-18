@@ -38,11 +38,21 @@ interface Agent {
   activity?: string;
 }
 
+interface GroveResourceSpec {
+  requests?: { cpu?: string; memory?: string };
+  limits?: { cpu?: string; memory?: string };
+  disk?: string;
+}
+
 interface GroveSettings {
   defaultTemplate?: string | undefined;
   defaultHarnessConfig?: string | undefined;
   telemetryEnabled?: boolean | null | undefined;
   activeProfile?: string | undefined;
+  defaultMaxTurns?: number;
+  defaultMaxModelCalls?: number;
+  defaultMaxDuration?: string;
+  defaultResources?: GroveResourceSpec;
 }
 
 interface HarnessConfigEntry {
@@ -124,6 +134,32 @@ export class ScionPageGroveSettings extends LitElement {
 
   @state()
   private configTelemetryEnabled: boolean | null = null;
+
+  // Default agent limits
+  @state()
+  private configDefaultMaxTurns = 0;
+
+  @state()
+  private configDefaultMaxModelCalls = 0;
+
+  @state()
+  private configDefaultMaxDuration = '';
+
+  // Default resources
+  @state()
+  private configDefaultResCpuReq = '';
+
+  @state()
+  private configDefaultResMemReq = '';
+
+  @state()
+  private configDefaultResCpuLim = '';
+
+  @state()
+  private configDefaultResMemLim = '';
+
+  @state()
+  private configDefaultResDisk = '';
 
   private syncAgentId: string | null = null;
   private syncPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -556,6 +592,15 @@ export class ScionPageGroveSettings extends LitElement {
         this.configDefaultTemplate = this.settings.defaultTemplate || '';
         this.configDefaultHarnessConfig = this.settings.defaultHarnessConfig || '';
         this.configTelemetryEnabled = this.settings.telemetryEnabled ?? null;
+        this.configDefaultMaxTurns = this.settings.defaultMaxTurns || 0;
+        this.configDefaultMaxModelCalls = this.settings.defaultMaxModelCalls || 0;
+        this.configDefaultMaxDuration = this.settings.defaultMaxDuration || '';
+        const res = this.settings.defaultResources;
+        this.configDefaultResCpuReq = res?.requests?.cpu || '';
+        this.configDefaultResMemReq = res?.requests?.memory || '';
+        this.configDefaultResCpuLim = res?.limits?.cpu || '';
+        this.configDefaultResMemLim = res?.limits?.memory || '';
+        this.configDefaultResDisk = res?.disk || '';
       }
     } catch (err) {
       console.error('Failed to load grove settings:', err);
@@ -584,10 +629,41 @@ export class ScionPageGroveSettings extends LitElement {
     this.settingsSuccess = null;
 
     try {
+      // Build default resources if any field is set
+      let defaultResources: GroveResourceSpec | undefined;
+      if (
+        this.configDefaultResCpuReq ||
+        this.configDefaultResMemReq ||
+        this.configDefaultResCpuLim ||
+        this.configDefaultResMemLim ||
+        this.configDefaultResDisk
+      ) {
+        defaultResources = {};
+        if (this.configDefaultResCpuReq || this.configDefaultResMemReq) {
+          defaultResources.requests = {
+            cpu: this.configDefaultResCpuReq || undefined,
+            memory: this.configDefaultResMemReq || undefined,
+          };
+        }
+        if (this.configDefaultResCpuLim || this.configDefaultResMemLim) {
+          defaultResources.limits = {
+            cpu: this.configDefaultResCpuLim || undefined,
+            memory: this.configDefaultResMemLim || undefined,
+          };
+        }
+        if (this.configDefaultResDisk) {
+          defaultResources.disk = this.configDefaultResDisk;
+        }
+      }
+
       const body: GroveSettings = {
         defaultTemplate: this.configDefaultTemplate || undefined,
         defaultHarnessConfig: this.configDefaultHarnessConfig || undefined,
         telemetryEnabled: this.configTelemetryEnabled,
+        defaultMaxTurns: this.configDefaultMaxTurns || undefined,
+        defaultMaxModelCalls: this.configDefaultMaxModelCalls || undefined,
+        defaultMaxDuration: this.configDefaultMaxDuration || undefined,
+        defaultResources,
       };
 
       const response = await apiFetch(`/api/v1/groves/${this.groveId}/settings`, {
@@ -928,6 +1004,123 @@ export class ScionPageGroveSettings extends LitElement {
               ${this.configTelemetryEnabled ? 'Enabled' : 'Disabled'}
             </sl-switch>
             <span class="field-help">Enable or disable telemetry for agents in this grove.</span>
+          </div>
+
+          <div style="border-top: 1px solid var(--scion-border, #e2e8f0); padding-top: 1rem; margin-top: 0.5rem;">
+            <label style="font-size: 0.875rem; font-weight: 600; color: var(--scion-text, #1e293b); margin-bottom: 0.5rem; display: block;">Default Agent Limits</label>
+            <span class="field-help" style="display: block; margin-bottom: 0.75rem;">Applied to new agents unless overridden by template or agent config.</span>
+          </div>
+
+          <div class="config-field">
+            <label>Default Max Turns</label>
+            <sl-input
+              type="number"
+              placeholder="No limit"
+              .value=${this.configDefaultMaxTurns ? String(this.configDefaultMaxTurns) : ''}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultMaxTurns = parseInt((e.target as HTMLInputElement).value) || 0;
+              }}
+            ></sl-input>
+            <span class="field-help">Maximum conversation turns per agent.</span>
+          </div>
+
+          <div class="config-field">
+            <label>Default Max Model Calls</label>
+            <sl-input
+              type="number"
+              placeholder="No limit"
+              .value=${this.configDefaultMaxModelCalls ? String(this.configDefaultMaxModelCalls) : ''}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultMaxModelCalls = parseInt((e.target as HTMLInputElement).value) || 0;
+              }}
+            ></sl-input>
+            <span class="field-help">Maximum LLM API calls per agent.</span>
+          </div>
+
+          <div class="config-field">
+            <label>Default Max Duration</label>
+            <sl-input
+              type="text"
+              placeholder="e.g. 2h, 30m"
+              .value=${this.configDefaultMaxDuration}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultMaxDuration = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+            <span class="field-help">Maximum execution time (Go duration format).</span>
+          </div>
+
+          <div style="border-top: 1px solid var(--scion-border, #e2e8f0); padding-top: 1rem; margin-top: 0.5rem;">
+            <label style="font-size: 0.875rem; font-weight: 600; color: var(--scion-text, #1e293b); margin-bottom: 0.5rem; display: block;">Default Resources</label>
+            <span class="field-help" style="display: block; margin-bottom: 0.75rem;">Default resource requests and limits for new agents.</span>
+          </div>
+
+          <div class="config-field">
+            <label>CPU Request</label>
+            <sl-input
+              type="text"
+              placeholder="e.g. 500m, 1"
+              .value=${this.configDefaultResCpuReq}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultResCpuReq = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+
+          <div class="config-field">
+            <label>Memory Request</label>
+            <sl-input
+              type="text"
+              placeholder="e.g. 512Mi, 1Gi"
+              .value=${this.configDefaultResMemReq}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultResMemReq = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+
+          <div class="config-field">
+            <label>CPU Limit</label>
+            <sl-input
+              type="text"
+              placeholder="e.g. 1, 2"
+              .value=${this.configDefaultResCpuLim}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultResCpuLim = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+
+          <div class="config-field">
+            <label>Memory Limit</label>
+            <sl-input
+              type="text"
+              placeholder="e.g. 1Gi, 2Gi"
+              .value=${this.configDefaultResMemLim}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultResMemLim = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+
+          <div class="config-field">
+            <label>Disk</label>
+            <sl-input
+              type="text"
+              placeholder="e.g. 10Gi"
+              .value=${this.configDefaultResDisk}
+              ?disabled=${!canEdit}
+              @sl-input=${(e: Event) => {
+                this.configDefaultResDisk = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
           </div>
 
           ${canEdit

@@ -100,6 +100,77 @@ func TestGroveSettings_ClearValues(t *testing.T) {
 	assert.Nil(t, resp.TelemetryEnabled)
 }
 
+func TestGroveSettings_DefaultLimits(t *testing.T) {
+	srv, s := testServer(t)
+	grove := createTestGroveForSettings(t, s)
+
+	putBody := hubclient.GroveSettings{
+		DefaultMaxTurns:      100,
+		DefaultMaxModelCalls: 500,
+		DefaultMaxDuration:   "2h",
+		DefaultResources: &hubclient.GroveResourceSpec{
+			Requests: &hubclient.GroveResourceList{CPU: "500m", Memory: "1Gi"},
+			Limits:   &hubclient.GroveResourceList{CPU: "2", Memory: "4Gi"},
+			Disk:     "10Gi",
+		},
+	}
+
+	rec := doRequest(t, srv, http.MethodPut, "/api/v1/groves/"+grove.ID+"/settings", putBody)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var putResp hubclient.GroveSettings
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&putResp))
+	assert.Equal(t, 100, putResp.DefaultMaxTurns)
+	assert.Equal(t, 500, putResp.DefaultMaxModelCalls)
+	assert.Equal(t, "2h", putResp.DefaultMaxDuration)
+	require.NotNil(t, putResp.DefaultResources)
+	require.NotNil(t, putResp.DefaultResources.Requests)
+	assert.Equal(t, "500m", putResp.DefaultResources.Requests.CPU)
+	assert.Equal(t, "1Gi", putResp.DefaultResources.Requests.Memory)
+	require.NotNil(t, putResp.DefaultResources.Limits)
+	assert.Equal(t, "2", putResp.DefaultResources.Limits.CPU)
+	assert.Equal(t, "4Gi", putResp.DefaultResources.Limits.Memory)
+	assert.Equal(t, "10Gi", putResp.DefaultResources.Disk)
+
+	// GET should return persisted values
+	rec = doRequest(t, srv, http.MethodGet, "/api/v1/groves/"+grove.ID+"/settings", nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var getResp hubclient.GroveSettings
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&getResp))
+	assert.Equal(t, 100, getResp.DefaultMaxTurns)
+	assert.Equal(t, 500, getResp.DefaultMaxModelCalls)
+	assert.Equal(t, "2h", getResp.DefaultMaxDuration)
+	require.NotNil(t, getResp.DefaultResources)
+	assert.Equal(t, "10Gi", getResp.DefaultResources.Disk)
+}
+
+func TestGroveSettings_ClearDefaultLimits(t *testing.T) {
+	srv, s := testServer(t)
+	grove := createTestGroveForSettings(t, s)
+
+	// Set values first
+	putBody := hubclient.GroveSettings{
+		DefaultMaxTurns:      100,
+		DefaultMaxModelCalls: 500,
+		DefaultMaxDuration:   "2h",
+	}
+	rec := doRequest(t, srv, http.MethodPut, "/api/v1/groves/"+grove.ID+"/settings", putBody)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Clear by sending zero/empty values
+	clearBody := hubclient.GroveSettings{}
+	rec = doRequest(t, srv, http.MethodPut, "/api/v1/groves/"+grove.ID+"/settings", clearBody)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp hubclient.GroveSettings
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, 0, resp.DefaultMaxTurns)
+	assert.Equal(t, 0, resp.DefaultMaxModelCalls)
+	assert.Empty(t, resp.DefaultMaxDuration)
+	assert.Nil(t, resp.DefaultResources)
+}
+
 func TestGroveSettings_NotFound(t *testing.T) {
 	srv, _ := testServer(t)
 

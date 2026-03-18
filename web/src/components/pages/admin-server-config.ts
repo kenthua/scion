@@ -166,6 +166,12 @@ interface V1RuntimeConfig {
   sync?: string;
 }
 
+interface ResourceSpec {
+  requests?: { cpu?: string; memory?: string };
+  limits?: { cpu?: string; memory?: string };
+  disk?: string;
+}
+
 interface ServerConfigResponse {
   scion_version?: string;
   scion_commit?: string;
@@ -181,6 +187,10 @@ interface ServerConfigResponse {
   runtimes?: Record<string, V1RuntimeConfig>;
   harness_configs?: Record<string, unknown>;
   profiles?: Record<string, unknown>;
+  default_max_turns?: number;
+  default_max_model_calls?: number;
+  default_max_duration?: string;
+  default_resources?: ResourceSpec;
 }
 
 interface ReloadResult {
@@ -211,6 +221,16 @@ export class ScionPageAdminServerConfig extends LitElement {
   @state() private defaultHarnessConfig = '';
   @state() private imageRegistry = '';
   @state() private workspacePath = '';
+
+  // Default agent limits
+  @state() private defaultMaxTurns = 0;
+  @state() private defaultMaxModelCalls = 0;
+  @state() private defaultMaxDuration = '';
+  @state() private defaultResCpuReq = '';
+  @state() private defaultResMemReq = '';
+  @state() private defaultResCpuLim = '';
+  @state() private defaultResMemLim = '';
+  @state() private defaultResDisk = '';
 
   // Server
   @state() private serverMode = '';
@@ -528,6 +548,17 @@ export class ScionPageAdminServerConfig extends LitElement {
     this.imageRegistry = data.image_registry || '';
     this.workspacePath = data.workspace_path || '';
 
+    // Default agent limits
+    this.defaultMaxTurns = data.default_max_turns || 0;
+    this.defaultMaxModelCalls = data.default_max_model_calls || 0;
+    this.defaultMaxDuration = data.default_max_duration || '';
+    const defRes = data.default_resources;
+    this.defaultResCpuReq = defRes?.requests?.cpu || '';
+    this.defaultResMemReq = defRes?.requests?.memory || '';
+    this.defaultResCpuLim = defRes?.limits?.cpu || '';
+    this.defaultResMemLim = defRes?.limits?.memory || '';
+    this.defaultResDisk = defRes?.disk || '';
+
     // Server
     const srv = data.server;
     if (srv) {
@@ -625,6 +656,34 @@ export class ScionPageAdminServerConfig extends LitElement {
     payload.default_harness_config = this.defaultHarnessConfig || undefined;
     payload.image_registry = this.imageRegistry || undefined;
     payload.workspace_path = this.workspacePath || undefined;
+
+    // Default agent limits
+    payload.default_max_turns = this.defaultMaxTurns || undefined;
+    payload.default_max_model_calls = this.defaultMaxModelCalls || undefined;
+    payload.default_max_duration = this.defaultMaxDuration || undefined;
+    if (
+      this.defaultResCpuReq ||
+      this.defaultResMemReq ||
+      this.defaultResCpuLim ||
+      this.defaultResMemLim ||
+      this.defaultResDisk
+    ) {
+      const defaultResources: Record<string, unknown> = {};
+      if (this.defaultResCpuReq || this.defaultResMemReq) {
+        defaultResources.requests = {
+          cpu: this.defaultResCpuReq || undefined,
+          memory: this.defaultResMemReq || undefined,
+        };
+      }
+      if (this.defaultResCpuLim || this.defaultResMemLim) {
+        defaultResources.limits = {
+          cpu: this.defaultResCpuLim || undefined,
+          memory: this.defaultResMemLim || undefined,
+        };
+      }
+      if (this.defaultResDisk) defaultResources.disk = this.defaultResDisk;
+      payload.default_resources = defaultResources;
+    }
 
     // Server
     const server: Record<string, unknown> = {};
@@ -988,6 +1047,103 @@ export class ScionPageAdminServerConfig extends LitElement {
               value=${this.workspacePath}
               @sl-input=${(e: Event) => {
                 this.workspacePath = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3 class="section-title">Default Agent Limits</h3>
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Default Max Turns</label>
+            <span class="hint">Maximum conversation turns for new agents</span>
+            <sl-input
+              type="number"
+              value=${this.defaultMaxTurns ? String(this.defaultMaxTurns) : ''}
+              placeholder="No limit"
+              @sl-input=${(e: Event) => {
+                this.defaultMaxTurns = parseInt((e.target as HTMLInputElement).value) || 0;
+              }}
+            ></sl-input>
+          </div>
+          <div class="form-field">
+            <label>Default Max Model Calls</label>
+            <span class="hint">Maximum LLM API calls for new agents</span>
+            <sl-input
+              type="number"
+              value=${this.defaultMaxModelCalls ? String(this.defaultMaxModelCalls) : ''}
+              placeholder="No limit"
+              @sl-input=${(e: Event) => {
+                this.defaultMaxModelCalls = parseInt((e.target as HTMLInputElement).value) || 0;
+              }}
+            ></sl-input>
+          </div>
+          <div class="form-field full-width">
+            <label>Default Max Duration</label>
+            <span class="hint">Maximum execution time (Go duration, e.g. 2h, 30m)</span>
+            <sl-input
+              value=${this.defaultMaxDuration}
+              placeholder="e.g. 2h, 30m"
+              @sl-input=${(e: Event) => {
+                this.defaultMaxDuration = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3 class="section-title">Default Agent Resources</h3>
+        <div class="form-grid">
+          <div class="form-field">
+            <label>CPU Request</label>
+            <sl-input
+              value=${this.defaultResCpuReq}
+              placeholder="e.g. 500m, 1"
+              @sl-input=${(e: Event) => {
+                this.defaultResCpuReq = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+          <div class="form-field">
+            <label>Memory Request</label>
+            <sl-input
+              value=${this.defaultResMemReq}
+              placeholder="e.g. 512Mi, 1Gi"
+              @sl-input=${(e: Event) => {
+                this.defaultResMemReq = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+          <div class="form-field">
+            <label>CPU Limit</label>
+            <sl-input
+              value=${this.defaultResCpuLim}
+              placeholder="e.g. 1, 2"
+              @sl-input=${(e: Event) => {
+                this.defaultResCpuLim = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+          <div class="form-field">
+            <label>Memory Limit</label>
+            <sl-input
+              value=${this.defaultResMemLim}
+              placeholder="e.g. 1Gi, 2Gi"
+              @sl-input=${(e: Event) => {
+                this.defaultResMemLim = (e.target as HTMLInputElement).value;
+              }}
+            ></sl-input>
+          </div>
+          <div class="form-field full-width">
+            <label>Disk</label>
+            <sl-input
+              value=${this.defaultResDisk}
+              placeholder="e.g. 10Gi"
+              @sl-input=${(e: Event) => {
+                this.defaultResDisk = (e.target as HTMLInputElement).value;
               }}
             ></sl-input>
           </div>

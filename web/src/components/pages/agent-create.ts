@@ -106,7 +106,15 @@ export class ScionPageAgentCreate extends LitElement {
   private groveFromUrl = false;
 
   /** Cached grove settings keyed by groveId */
-  private groveSettingsCache: Map<string, { defaultTemplate?: string }> = new Map();
+  private groveSettingsCache: Map<
+    string,
+    {
+      defaultTemplate?: string;
+      defaultMaxTurns?: number;
+      defaultMaxModelCalls?: number;
+      defaultMaxDuration?: string;
+    }
+  > = new Map();
 
   /** Profiles available on the currently selected broker */
   private get selectedBrokerProfiles(): import('../../shared/types.js').BrokerProfile[] {
@@ -801,7 +809,12 @@ export class ScionPageAgentCreate extends LitElement {
    */
   private async fetchGroveSettings(
     groveId: string
-  ): Promise<{ defaultTemplate?: string } | null> {
+  ): Promise<{
+    defaultTemplate?: string;
+    defaultMaxTurns?: number;
+    defaultMaxModelCalls?: number;
+    defaultMaxDuration?: string;
+  } | null> {
     if (!groveId) return null;
 
     const cached = this.groveSettingsCache.get(groveId);
@@ -810,7 +823,12 @@ export class ScionPageAgentCreate extends LitElement {
     try {
       const res = await apiFetch(`/api/v1/groves/${groveId}/settings`);
       if (res.ok) {
-        const data = (await res.json()) as { defaultTemplate?: string };
+        const data = (await res.json()) as {
+          defaultTemplate?: string;
+          defaultMaxTurns?: number;
+          defaultMaxModelCalls?: number;
+          defaultMaxDuration?: string;
+        };
         this.groveSettingsCache.set(groveId, data);
         return data;
       }
