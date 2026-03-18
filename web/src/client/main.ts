@@ -123,6 +123,7 @@ const ROUTES: RouteConfig[] = [
   { pattern: /^\/profile\/env$/, tag: 'scion-page-profile-env-vars', load: () => import('../components/pages/profile-env-vars.js') },
   { pattern: /^\/profile\/secrets$/, tag: 'scion-page-profile-secrets', load: () => import('../components/pages/profile-secrets.js') },
   { pattern: /^\/profile\/settings$/, tag: 'scion-page-profile-settings', load: () => import('../components/pages/profile-settings.js') },
+  { pattern: /^\/profile\/tokens$/, tag: 'scion-page-profile-tokens', load: () => import('../components/pages/profile-tokens.js') },
   { pattern: /^\/profile$/, tag: 'scion-page-profile-env-vars', load: () => import('../components/pages/profile-env-vars.js') },
   { pattern: /^\/groves\/new$/, tag: 'scion-page-grove-create', load: () => import('../components/pages/grove-create.js') },
   { pattern: /^\/groves\/[^/]+\/settings$/, tag: 'scion-page-grove-settings', load: () => import('../components/pages/grove-settings.js') },
@@ -142,7 +143,7 @@ const STANDALONE_ROUTES = new Set(['scion-login-page']);
 /**
  * Routes that render inside the profile shell instead of the main app shell
  */
-const PROFILE_ROUTES = new Set(['scion-page-profile-env-vars', 'scion-page-profile-secrets', 'scion-page-profile-settings']);
+const PROFILE_ROUTES = new Set(['scion-page-profile-env-vars', 'scion-page-profile-secrets', 'scion-page-profile-settings', 'scion-page-profile-tokens']);
 
 /**
  * Routes that require admin role. Non-admin users are redirected to dashboard.

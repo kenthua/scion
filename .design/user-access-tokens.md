@@ -260,11 +260,11 @@ Add a **"Access Tokens"** page to the profile section:
 2. ✅ Add hubclient `TokenService` interface and implementation in `pkg/hubclient/tokens.go`
 3. ✅ Register `Tokens()` on the `Client` interface in `pkg/hubclient/client.go`
 
-#### Phase 3: Web UI
+#### Phase 3: Web UI ✅
 
-1. Add profile token list page component
-2. Add create token dialog component
-3. Add to profile navigation
+1. ✅ Add profile token list page component (`web/src/components/pages/profile-tokens.ts`)
+2. ✅ Add create token dialog component with grove selector, scope checkboxes, expiry picker, and one-time token reveal modal (`web/src/components/shared/token-list.ts`)
+3. ✅ Add to profile navigation, routing, and shell title mapping
 
 ## Alternatives Considered
 

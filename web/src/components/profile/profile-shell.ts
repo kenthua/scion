@@ -35,6 +35,7 @@ const PROFILE_TITLES: Record<string, string> = {
   '/profile/env': 'Environment Variables',
   '/profile/secrets': 'Secrets',
   '/profile/settings': 'Settings',
+  '/profile/tokens': 'Access Tokens',
 };
 
 @customElement('scion-profile-shell')
