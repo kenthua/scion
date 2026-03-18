@@ -418,6 +418,24 @@ func TestGroveWorkspaceDownload_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestGroveWorkspaceDownload_InlineView(t *testing.T) {
+	srv, _ := testServer(t)
+	grove, workspacePath := createTestHubNativeGrove(t, srv, "WS Download Inline")
+
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, "readme.txt"), []byte("inline content"), 0644))
+
+	// Without ?view=true — should be attachment
+	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/files/readme.txt", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), "attachment")
+
+	// With ?view=true — should be inline
+	rec = doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/workspace/files/readme.txt?view=true", grove.ID), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Disposition"), "inline")
+	assert.Equal(t, "inline content", rec.Body.String())
+}
+
 func TestGroveWorkspaceDownload_ScionDirRejected(t *testing.T) {
 	srv, _ := testServer(t)
 	grove, _ := createTestHubNativeGrove(t, srv, "WS Download Scion")

@@ -85,7 +85,7 @@ func (s *Server) handleGroveWorkspace(w http.ResponseWriter, r *http.Request, gr
 	case r.Method == http.MethodGet && filePath == "":
 		s.handleGroveWorkspaceList(w, workspacePath)
 	case r.Method == http.MethodGet && filePath != "":
-		s.handleGroveWorkspaceDownload(w, workspacePath, filePath)
+		s.handleGroveWorkspaceDownload(w, r, workspacePath, filePath)
 	case r.Method == http.MethodPost && filePath == "":
 		s.handleGroveWorkspaceUpload(w, r, workspacePath)
 	case r.Method == http.MethodDelete && filePath != "":
@@ -262,8 +262,10 @@ func (s *Server) handleGroveWorkspaceUpload(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleGroveWorkspaceDownload serves a single file from a grove workspace for download.
-func (s *Server) handleGroveWorkspaceDownload(w http.ResponseWriter, workspacePath, filePath string) {
+// handleGroveWorkspaceDownload serves a single file from a grove workspace.
+// When the query parameter "view=true" is set, the file is served inline for
+// in-browser preview; otherwise the response forces a download.
+func (s *Server) handleGroveWorkspaceDownload(w http.ResponseWriter, r *http.Request, workspacePath, filePath string) {
 	// Validate the file path
 	if err := validateWorkspaceFilePath(filePath); err != nil {
 		BadRequest(w, fmt.Sprintf("Invalid file path %q: %s", filePath, err.Error()))
@@ -303,7 +305,11 @@ func (s *Server) handleGroveWorkspaceDownload(w http.ResponseWriter, workspacePa
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+	disposition := "attachment"
+	if r.URL.Query().Get("view") == "true" {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, fileName))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 
 	io.Copy(w, f)

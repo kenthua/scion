@@ -560,6 +560,12 @@ export class ScionPageGroveDetail extends LitElement {
 
     .file-actions {
       text-align: right;
+      white-space: nowrap;
+    }
+
+    .file-actions .preview-disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
     }
 
     .workspace-empty {
@@ -884,11 +890,45 @@ export class ScionPageGroveDetail extends LitElement {
     }
   }
 
-  private handleFileDownload(filePath: string): void {
-    const encodedPath = filePath
+  private static readonly PREVIEWABLE_EXTENSIONS = new Set([
+    // Images
+    '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico',
+    // Text
+    '.txt', '.log', '.csv', '.tsv',
+    // Markdown
+    '.md',
+    // Code
+    '.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs',
+    '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.cs',
+    '.css', '.scss', '.less', '.html', '.htm', '.xml', '.xsl',
+    '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+    '.sh', '.bash', '.zsh', '.fish',
+    '.sql', '.rb', '.php', '.swift', '.kt', '.scala', '.r', '.lua',
+    '.pl', '.ex', '.exs', '.elm', '.hs', '.clj', '.vim',
+    '.dockerfile', '.makefile', '.env', '.gitignore', '.editorconfig',
+    // PDF
+    '.pdf',
+  ]);
+
+  private isPreviewable(filePath: string): boolean {
+    const ext = filePath.includes('.') ? '.' + filePath.split('.').pop()!.toLowerCase() : '';
+    return ScionPageGroveDetail.PREVIEWABLE_EXTENSIONS.has(ext);
+  }
+
+  private encodeFilePath(filePath: string): string {
+    return filePath
       .split('/')
       .map((seg) => encodeURIComponent(seg))
       .join('/');
+  }
+
+  private handleFilePreview(filePath: string): void {
+    const encodedPath = this.encodeFilePath(filePath);
+    window.open(`/api/v1/groves/${this.groveId}/workspace/files/${encodedPath}?view=true`, '_blank');
+  }
+
+  private handleFileDownload(filePath: string): void {
+    const encodedPath = this.encodeFilePath(filePath);
     // Open the download URL in a new context to trigger browser download
     window.open(`/api/v1/groves/${this.groveId}/workspace/files/${encodedPath}`, '_blank');
   }
@@ -1250,6 +1290,22 @@ export class ScionPageGroveDetail extends LitElement {
                             <span class="file-date">${this.formatDate(file.modTime)}</span>
                           </td>
                           <td class="file-actions">
+                            ${this.isPreviewable(file.path)
+                              ? html`
+                                  <sl-icon-button
+                                    name="eye"
+                                    label="Preview ${file.path}"
+                                    @click=${() => this.handleFilePreview(file.path)}
+                                  ></sl-icon-button>
+                                `
+                              : html`
+                                  <sl-icon-button
+                                    name="eye"
+                                    label="Preview not available for this format"
+                                    class="preview-disabled"
+                                    disabled
+                                  ></sl-icon-button>
+                                `}
                             <sl-icon-button
                               name="download"
                               label="Download ${file.path}"

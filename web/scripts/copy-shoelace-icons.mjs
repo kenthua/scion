@@ -59,6 +59,7 @@ const USED_ICONS = [
   'exclamation-circle-fill',
   'exclamation-octagon',
   'exclamation-triangle',
+  'eye',
   'eye-slash',
   'file-earmark',
   'file-earmark-zip',
