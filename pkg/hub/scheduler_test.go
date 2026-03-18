@@ -312,12 +312,14 @@ type mockScheduledEventStore struct {
 	mu          sync.Mutex
 	events      map[string]*store.ScheduledEvent
 	agents      map[string]*store.Agent
+	groves      map[string]*store.Grove
 }
 
 func newMockStore() *mockScheduledEventStore {
 	return &mockScheduledEventStore{
 		events: make(map[string]*store.ScheduledEvent),
 		agents: make(map[string]*store.Agent),
+		groves: make(map[string]*store.Grove),
 	}
 }
 
@@ -417,6 +419,37 @@ func (m *mockScheduledEventStore) GetAgentBySlug(_ context.Context, groveID, slu
 			return &cp, nil
 		}
 	}
+	return nil, store.ErrNotFound
+}
+
+// Grove and agent-creation methods for dispatch_agent handler tests
+
+func (m *mockScheduledEventStore) GetGrove(_ context.Context, id string) (*store.Grove, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if g, ok := m.groves[id]; ok {
+		cp := *g
+		return &cp, nil
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockScheduledEventStore) GetGroveProviders(_ context.Context, _ string) ([]store.GroveProvider, error) {
+	return nil, nil
+}
+
+func (m *mockScheduledEventStore) CreateAgent(_ context.Context, agent *store.Agent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.agents[agent.ID] = agent
+	return nil
+}
+
+func (m *mockScheduledEventStore) GetTemplate(_ context.Context, _ string) (*store.Template, error) {
+	return nil, store.ErrNotFound
+}
+
+func (m *mockScheduledEventStore) GetTemplateBySlug(_ context.Context, _, _, _ string) (*store.Template, error) {
 	return nil, store.ErrNotFound
 }
 
@@ -1093,5 +1126,142 @@ func TestMultipleEventHandlers(t *testing.T) {
 	}
 	if got := statusCalled.Load(); got != 1 {
 		t.Errorf("expected status handler called once, got %d", got)
+	}
+}
+
+func TestDispatchAgentEventHandler_InvalidPayload(t *testing.T) {
+	ms := newMockStore()
+	srv := &Server{store: ms}
+	handler := srv.dispatchAgentEventHandler()
+
+	ctx := context.Background()
+	evt := store.ScheduledEvent{
+		ID:        "dispatch-bad-1",
+		GroveID:   "grove-1",
+		EventType: "dispatch_agent",
+		Payload:   `not valid json`,
+	}
+
+	err := handler(ctx, evt)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON payload")
+	}
+	if !strings.Contains(err.Error(), "invalid dispatch_agent payload") {
+		t.Errorf("expected 'invalid dispatch_agent payload' in error, got: %s", err)
+	}
+}
+
+func TestDispatchAgentEventHandler_MissingAgentName(t *testing.T) {
+	ms := newMockStore()
+	srv := &Server{store: ms}
+	handler := srv.dispatchAgentEventHandler()
+
+	ctx := context.Background()
+	evt := store.ScheduledEvent{
+		ID:        "dispatch-noname-1",
+		GroveID:   "grove-1",
+		EventType: "dispatch_agent",
+		Payload:   `{"template":"my-template"}`,
+	}
+
+	err := handler(ctx, evt)
+	if err == nil {
+		t.Fatal("expected error for missing agentName")
+	}
+	if !strings.Contains(err.Error(), "agentName is required") {
+		t.Errorf("expected 'agentName is required' in error, got: %s", err)
+	}
+}
+
+func TestDispatchAgentEventHandler_GroveNotFound(t *testing.T) {
+	ms := newMockStore()
+	srv := &Server{store: ms}
+	handler := srv.dispatchAgentEventHandler()
+
+	ctx := context.Background()
+	evt := store.ScheduledEvent{
+		ID:        "dispatch-nogrove-1",
+		GroveID:   "nonexistent-grove",
+		EventType: "dispatch_agent",
+		Payload:   `{"agentName":"worker-1"}`,
+	}
+
+	err := handler(ctx, evt)
+	if err == nil {
+		t.Fatal("expected error for missing grove")
+	}
+	if !strings.Contains(err.Error(), "no longer exists") {
+		t.Errorf("expected 'no longer exists' in error, got: %s", err)
+	}
+}
+
+func TestDispatchAgentEventHandler_AgentAlreadyExists(t *testing.T) {
+	ms := newMockStore()
+	ms.groves["grove-1"] = &store.Grove{ID: "grove-1", Name: "test-grove"}
+	ms.agents["existing-1"] = &store.Agent{
+		ID:      "existing-1",
+		Slug:    "worker-1",
+		Name:    "worker-1",
+		GroveID: "grove-1",
+		Phase:   "running",
+	}
+
+	srv := &Server{store: ms}
+	handler := srv.dispatchAgentEventHandler()
+
+	ctx := context.Background()
+	evt := store.ScheduledEvent{
+		ID:        "dispatch-exists-1",
+		GroveID:   "grove-1",
+		EventType: "dispatch_agent",
+		Payload:   `{"agentName":"worker-1"}`,
+	}
+
+	err := handler(ctx, evt)
+	if err == nil {
+		t.Fatal("expected error for existing agent")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected 'already exists' in error, got: %s", err)
+	}
+}
+
+func TestDispatchAgentEventHandler_CreatesAgentNoDispatcher(t *testing.T) {
+	ms := newMockStore()
+	ms.groves["grove-1"] = &store.Grove{ID: "grove-1", Name: "test-grove"}
+
+	srv := &Server{store: ms}
+	handler := srv.dispatchAgentEventHandler()
+
+	ctx := context.Background()
+	evt := store.ScheduledEvent{
+		ID:        "dispatch-ok-1",
+		GroveID:   "grove-1",
+		EventType: "dispatch_agent",
+		Payload:   `{"agentName":"new-worker","template":"my-tmpl","task":"Do the thing"}`,
+	}
+
+	// Should succeed — agent is created but not dispatched (no dispatcher)
+	err := handler(ctx, evt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify agent was created in the store
+	found := false
+	for _, a := range ms.agents {
+		if a.Slug == "new-worker" && a.GroveID == "grove-1" {
+			found = true
+			if a.Template != "my-tmpl" {
+				t.Errorf("expected template 'my-tmpl', got %q", a.Template)
+			}
+			if a.AppliedConfig == nil || a.AppliedConfig.Task != "Do the thing" {
+				t.Errorf("expected task 'Do the thing' in applied config")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("agent was not created in the store")
 	}
 }
