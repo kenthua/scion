@@ -723,6 +723,22 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 		log.Printf("Secret backend configured: %s", cfg.Secrets.Backend)
 	}
 
+	// Initialize GCP token generator for agent identity impersonation.
+	// This uses Application Default Credentials; on GCE/Cloud Run the Hub's
+	// own SA is auto-detected. Non-fatal if GCP is not available.
+	gcpGen, gcpErr := hub.NewIAMTokenGenerator(ctx, "")
+	if gcpErr != nil {
+		log.Printf("GCP token generator not available (agent GCP identity disabled): %v", gcpErr)
+	} else {
+		hubSrv.SetGCPTokenGenerator(gcpGen)
+		saEmail := gcpGen.ServiceAccountEmail()
+		if saEmail != "" {
+			log.Printf("GCP token generator configured (hub SA: %s)", saEmail)
+		} else {
+			log.Printf("GCP token generator configured (hub SA: unknown - not running on GCE)")
+		}
+	}
+
 	// Bootstrap local templates into Hub if database is empty
 	globalTemplatesDir := filepath.Join(globalDir, "templates")
 	if err := hubSrv.BootstrapTemplatesFromDir(ctx, globalTemplatesDir); err != nil {
