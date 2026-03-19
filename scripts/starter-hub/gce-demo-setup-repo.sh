@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# scripts/starter-hub/gce-demo-setup-repo.sh - Setup SSH deploy key and clone the repo on GCE
+# scripts/starter-hub/gce-demo-setup-repo.sh - Clone the public repo on GCE
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ if [[ -z "$PROJECT_ID" ]]; then
     exit 1
 fi
 
-echo "=== Ensuring scion user and .ssh directory exist on VM ==="
+echo "=== Ensuring scion user exists on VM ==="
 gcloud compute ssh "${INSTANCE_NAME}" \
     --project="${PROJECT_ID}" \
     --zone="${ZONE}" \
@@ -44,67 +44,27 @@ gcloud compute ssh "${INSTANCE_NAME}" \
         else
             echo '  -> docker group does not exist yet (cloud-init may still be running), skipping'
         fi
-        sudo mkdir -p /home/scion/.ssh
-        sudo chown -R scion:scion /home/scion/.ssh
-        sudo chmod 700 /home/scion/.ssh
     "
 
-echo "=== Generating SSH Key on VM (if needed) ==="
-gcloud compute ssh "${INSTANCE_NAME}" \
-    --project="${PROJECT_ID}" \
-    --zone="${ZONE}" \
-    --command "
-        sudo -u scion sh -c '
-            if [ ! -f /home/scion/.ssh/id_ed25519 ]; then
-                ssh-keygen -t ed25519 -N \"\" -f /home/scion/.ssh/id_ed25519 -C \"scion-'"${HUB_NAME}"'-deploy-key\"
-            fi
-        '
-    "
-
-echo "=== Retrieving Public Key from VM ==="
-PUB_KEY=$(gcloud compute ssh "${INSTANCE_NAME}" \
-    --project="${PROJECT_ID}" \
-    --zone="${ZONE}" \
-    --command "sudo cat /home/scion/.ssh/id_ed25519.pub")
-
-echo "=== Adding Deploy Key to GitHub Repo: ${REPO} ==="
-# Create a local temp file for the public key to use with gh
-TMP_PUB_KEY=$(mktemp)
-echo "$PUB_KEY" > "$TMP_PUB_KEY"
-trap 'rm -f "$TMP_PUB_KEY"' EXIT
-
-# Add the deploy key with a fixed title so re-runs are idempotent.
-# gh will error if the exact key content is already registered; that's expected and safe to ignore.
-KEY_TITLE="scion-${HUB_NAME}-deploy-key"
-gh repo deploy-key add "$TMP_PUB_KEY" --repo "$REPO" --title "$KEY_TITLE" || echo "Deploy key already exists or could not be added, continuing..."
-
-echo "=== Cloning Repo on GCE Instance using SSH ==="
+echo "=== Cloning Repo on GCE Instance ==="
 gcloud compute ssh "${INSTANCE_NAME}" \
     --project="${PROJECT_ID}" \
     --zone="${ZONE}" \
     --command "
         set -euo pipefail
 
-        # Add github.com to known_hosts (idempotent - avoid duplicates)
-        sudo -u scion sh -c '
-            if ! grep -q \"^github.com\" /home/scion/.ssh/known_hosts 2>/dev/null; then
-                ssh-keyscan github.com >> /home/scion/.ssh/known_hosts 2>/dev/null
-                echo \"  -> Added github.com to known_hosts\"
-            else
-                echo \"  -> github.com already in known_hosts\"
-            fi
-        '
+        CLONE_URL=\"https://github.com/${REPO}.git\"
 
         if [ -d \"/home/scion/scion/.git\" ]; then
-            echo \"Repository /home/scion/scion already exists, pulling latest...\"
-            sudo -u scion sh -c 'cd /home/scion/scion && git pull'
-        elif [ -d \"/home/scion/scion\" ]; then
-            echo \"Directory /home/scion/scion exists but is not a git repo, removing and cloning...\"
-            sudo rm -rf /home/scion/scion
-            sudo -u scion git clone \"git@github.com:${REPO}.git\" /home/scion/scion
+            echo \"Repository /home/scion/scion already exists, fetching latest...\"
+            sudo -u scion sh -c 'cd /home/scion/scion && git fetch origin && git reset --hard origin/HEAD'
         else
-            echo \"Cloning git@github.com:${REPO}.git...\"
-            sudo -u scion git clone \"git@github.com:${REPO}.git\" /home/scion/scion
+            if [ -d \"/home/scion/scion\" ]; then
+                echo \"Directory /home/scion/scion exists but is not a git repo, removing...\"
+                sudo rm -rf /home/scion/scion
+            fi
+            echo \"Cloning \${CLONE_URL}...\"
+            sudo -u scion git clone \"\${CLONE_URL}\" /home/scion/scion
         fi
 
         echo \"=== Repository Setup Complete ===\"
