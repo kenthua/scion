@@ -36,3 +36,23 @@ func TestCleanupIPTablesRedirect_NoIPTables(t *testing.T) {
 	// Cleanup should be a no-op when iptables is not available
 	cleanupIPTablesRedirect(18380)
 }
+
+func TestSetupMetadataBlock_NoPrivileges(t *testing.T) {
+	// In a non-privileged test environment, both iptables and ip route
+	// should fail, and setupMetadataBlock should return an error.
+	method, err := setupMetadataBlock()
+	if err == nil {
+		// If it succeeded, clean up and skip.
+		cleanupMetadataBlock(method)
+		t.Skip("metadata block succeeded in test environment, skipping error path test")
+	}
+	if method != blockNone {
+		t.Fatalf("expected blockNone on failure, got %v", method)
+	}
+	t.Logf("Expected metadata block failure: %v", err)
+}
+
+func TestCleanupMetadataBlock_Noop(t *testing.T) {
+	// Cleanup with blockNone should be a silent no-op
+	cleanupMetadataBlock(blockNone)
+}

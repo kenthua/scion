@@ -96,7 +96,8 @@ type Server struct {
 	fetchDone    chan struct{}
 
 	cancel              context.CancelFunc
-	iptablesConfigured  bool // whether iptables redirect was successfully set up
+	iptablesConfigured  bool        // whether iptables redirect was successfully set up
+	metadataBlocked     blockMethod // which blocking method was applied (block mode only)
 }
 
 type cachedAccessToken struct {
@@ -149,15 +150,35 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
-	// Set up iptables interception for Docker runtime.
-	// This redirects traffic to 169.254.169.254:80 to the local sidecar,
-	// ensuring tools that hardcode the metadata IP are intercepted.
+	// Set up network-level interception for the GCE metadata server IP.
+	//
+	// For block mode: we apply BOTH a REDIRECT (so GCP SDKs hitting the IP
+	// get a clean HTTP 403 from the sidecar) AND a filter-level REJECT or
+	// route-level block as defense-in-depth. If the nat REDIRECT is
+	// ineffective for any reason (wrong iptables backend, missing kernel
+	// module), the filter/route block ensures the real metadata server is
+	// unreachable. The REJECT rule is placed after the nat REDIRECT in
+	// processing order, so when REDIRECT works the REJECT never fires.
+	//
+	// For assign mode: only the REDIRECT is needed.
 	if err := setupIPTablesRedirect(s.config.Port); err != nil {
 		// Non-fatal: iptables may not be available (no NET_ADMIN cap, non-Docker runtime).
 		// The GCE_METADATA_HOST env var is the primary mechanism.
-		log.Debug("iptables interception not available: %v", err)
+		log.Debug("iptables redirect not available: %v", err)
 	} else {
 		s.iptablesConfigured = true
+	}
+
+	if s.config.Mode == "block" {
+		// Defense-in-depth: block traffic to the metadata IP at the
+		// filter/route level so that even if the nat REDIRECT fails or
+		// is bypassed, direct access to the real metadata server is denied.
+		method, err := setupMetadataBlock()
+		if err != nil {
+			log.Error("metadata block: failed to block metadata IP — direct access to %s may still be possible: %v", metadataIP, err)
+		} else {
+			s.metadataBlocked = method
+		}
 	}
 
 	// Start proactive refresh if in assign mode
@@ -167,6 +188,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
+		if s.metadataBlocked != blockNone {
+			cleanupMetadataBlock(s.metadataBlocked)
+		}
 		if s.iptablesConfigured {
 			cleanupIPTablesRedirect(s.config.Port)
 		}
