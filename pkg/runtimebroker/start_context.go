@@ -123,7 +123,7 @@ func (s *Server) buildStartContext(ctx context.Context, in startContextInputs) (
 			if existingID, err := config.ReadGroveID(scionDir); err != nil || existingID == "" {
 				if wErr := config.WriteGroveID(scionDir, in.GroveID); wErr != nil {
 					s.agentLifecycleLog.Warn("Failed to write grove-id for hub-native grove",
-						"agent_id", in.AgentID, "groveID", in.GroveID, "error", wErr)
+						"agent_id", in.AgentID, "grove_id", in.GroveID, "error", wErr)
 				} else {
 					// Create external grove-configs directories for split storage
 					if extAgents, err := config.GetGitGroveExternalAgentsDir(scionDir); err == nil && extAgents != "" {
@@ -134,7 +134,7 @@ func (s *Server) buildStartContext(ctx context.Context, in startContextInputs) (
 					}
 					if s.config.Debug {
 						s.agentLifecycleLog.Debug("Initialized hub-native grove with split storage",
-							"agent_id", in.AgentID, "slug", in.GroveSlug, "groveID", in.GroveID, "path", scionDir)
+							"agent_id", in.AgentID, "slug", in.GroveSlug, "grove_id", in.GroveID, "path", scionDir)
 					}
 				}
 			}
