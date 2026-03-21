@@ -23,7 +23,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type { PageData, Grove, Template, AdminGroup, GitHubAppGroveStatus, GitHubTokenPermissions } from '../../shared/types.js';
+import type { PageData, Grove, Template, AdminGroup, GitHubAppGroveStatus, GitHubTokenPermissions, RuntimeBroker, BrokerProfile } from '../../shared/types.js';
 import { can, canAny } from '../../shared/types.js';
 import { apiFetch, extractApiError } from '../../client/api.js';
 import '../shared/env-var-list.js';
@@ -65,6 +65,10 @@ interface HarnessConfigEntry {
   displayName?: string;
   harness: string;
   scope: string;
+}
+
+interface RuntimeBrokerWithProvider extends RuntimeBroker {
+  localPath?: string;
 }
 
 @customElement('scion-page-grove-settings')
@@ -194,6 +198,18 @@ export class ScionPageGroveSettings extends LitElement {
 
   @state()
   private githubAppLoading = false;
+
+  // Runtime Brokers (providers)
+  @state()
+  private brokers: RuntimeBrokerWithProvider[] = [];
+
+  @state()
+  private brokersLoading = false;
+
+  @state()
+  private brokersError: string | null = null;
+
+  private brokerRelativeTimeInterval: ReturnType<typeof setInterval> | null = null;
 
   private syncAgentId: string | null = null;
   private syncPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -603,6 +619,118 @@ export class ScionPageGroveSettings extends LitElement {
       color: #92400e;
       border: 1px solid #fcd34d;
     }
+
+    /* Runtime Brokers tab */
+    .broker-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .broker-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: var(--scion-bg-subtle, #f8fafc);
+      border: 1px solid var(--scion-border, #e2e8f0);
+      border-radius: var(--scion-radius, 0.5rem);
+    }
+
+    .broker-item.is-default {
+      border-color: var(--scion-primary, #3b82f6);
+      background: var(--sl-color-primary-50, #eff6ff);
+    }
+
+    .broker-status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .broker-status-dot.online { background: #16a34a; }
+    .broker-status-dot.offline { background: #94a3b8; }
+    .broker-status-dot.degraded { background: #eab308; }
+
+    .broker-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .broker-name-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .broker-name {
+      font-weight: 600;
+      font-size: 0.875rem;
+      color: var(--scion-text, #1e293b);
+    }
+
+    .broker-default-badge {
+      font-size: 0.6875rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      background: var(--scion-primary, #3b82f6);
+      color: #fff;
+      white-space: nowrap;
+    }
+
+    .broker-meta-row {
+      font-size: 0.75rem;
+      color: var(--scion-text-muted, #64748b);
+      margin-top: 0.25rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 0.75rem;
+    }
+
+    .broker-profiles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      margin-top: 0.375rem;
+    }
+
+    .broker-profile-badge {
+      font-size: 0.6875rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text-muted, #64748b);
+      border: 1px solid var(--scion-border, #e2e8f0);
+      white-space: nowrap;
+    }
+
+    .broker-profile-badge.available {
+      background: #f0fdf4;
+      border-color: #86efac;
+      color: #166534;
+    }
+
+    .broker-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      flex-shrink: 0;
+    }
+
+    .empty-brokers {
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--scion-text-muted, #64748b);
+      font-size: 0.875rem;
+    }
+
+    .empty-brokers sl-icon {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      display: block;
+    }
   `;
 
   override connectedCallback(): void {
@@ -618,11 +746,16 @@ export class ScionPageGroveSettings extends LitElement {
     void this.loadDropdownTemplates();
     void this.loadSettings();
     void this.loadHarnessConfigs();
+    void this.loadBrokers();
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.stopSyncPolling();
+    if (this.brokerRelativeTimeInterval) {
+      clearInterval(this.brokerRelativeTimeInterval);
+      this.brokerRelativeTimeInterval = null;
+    }
   }
 
   private async loadGrove(skipGitHubCheck = false): Promise<void> {
@@ -1568,6 +1701,7 @@ export class ScionPageGroveSettings extends LitElement {
           <sl-tab slot="nav" panel="shared-dirs" ?active=${this.activeResourcesTab === 'shared-dirs'}>Shared Directories</sl-tab>
           <sl-tab slot="nav" panel="templates" ?active=${this.activeResourcesTab === 'templates'}>Templates</sl-tab>
           <sl-tab slot="nav" panel="gcp-sa" ?active=${this.activeResourcesTab === 'gcp-sa'}>GCP Service Accounts</sl-tab>
+          <sl-tab slot="nav" panel="brokers" ?active=${this.activeResourcesTab === 'brokers'}>Runtime Brokers</sl-tab>
 
           <sl-tab-panel name="env-vars">
             <scion-env-var-list
@@ -1600,6 +1734,10 @@ export class ScionPageGroveSettings extends LitElement {
             <scion-gcp-service-account-list
               groveId=${this.groveId}
             ></scion-gcp-service-account-list>
+          </sl-tab-panel>
+
+          <sl-tab-panel name="brokers">
+            ${this.renderBrokersContent()}
           </sl-tab-panel>
         </sl-tab-group>
       </div>
@@ -1713,6 +1851,192 @@ export class ScionPageGroveSettings extends LitElement {
             ></scion-schedule-list>
           </sl-tab-panel>
         </sl-tab-group>
+      </div>
+    `;
+  }
+
+  private async loadBrokers(): Promise<void> {
+    this.brokersLoading = true;
+    this.brokersError = null;
+    try {
+      const response = await apiFetch(`/api/v1/runtime-brokers?groveId=${this.groveId}`);
+      if (!response.ok) {
+        throw new Error(await extractApiError(response, 'Failed to load brokers'));
+      }
+      const data = await response.json() as { brokers: RuntimeBrokerWithProvider[] };
+      this.brokers = data.brokers || [];
+
+      // Start relative time refresh if we have brokers
+      if (this.brokers.length > 0 && !this.brokerRelativeTimeInterval) {
+        this.brokerRelativeTimeInterval = setInterval(() => this.requestUpdate(), 15_000);
+      }
+    } catch (err) {
+      console.error('Failed to load brokers:', err);
+      this.brokersError = err instanceof Error ? err.message : 'Failed to load brokers';
+    } finally {
+      this.brokersLoading = false;
+    }
+  }
+
+  private async handleSetDefaultBroker(brokerId: string): Promise<void> {
+    try {
+      const response = await apiFetch(`/api/v1/groves/${this.groveId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultRuntimeBrokerId: brokerId }),
+      });
+      if (!response.ok) {
+        throw new Error(await extractApiError(response, 'Failed to set default broker'));
+      }
+      this.grove = (await response.json()) as Grove;
+    } catch (err) {
+      console.error('Failed to set default broker:', err);
+    }
+  }
+
+  private async handleRemoveBroker(brokerId: string, brokerName: string): Promise<void> {
+    const confirmed = confirm(`Remove broker "${brokerName}" from this grove?`);
+    if (!confirmed) return;
+
+    try {
+      const response = await apiFetch(`/api/v1/groves/${this.groveId}/providers/${brokerId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok && response.status !== 204) {
+        throw new Error(await extractApiError(response, 'Failed to remove broker'));
+      }
+      // If we removed the default broker, clear it from the grove
+      if (this.grove?.defaultRuntimeBrokerId === brokerId) {
+        this.grove = { ...this.grove, defaultRuntimeBrokerId: '' };
+      }
+      await this.loadBrokers();
+    } catch (err) {
+      console.error('Failed to remove broker:', err);
+    }
+  }
+
+  private formatRelativeTime(dateString: string): string {
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return '\u2014';
+      const diffMs = Date.now() - date.getTime();
+      const diffSeconds = Math.round(diffMs / 1000);
+      const diffMinutes = Math.round(diffMs / (1000 * 60));
+      const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+      if (Math.abs(diffSeconds) < 60) {
+        return rtf.format(-diffSeconds, 'second');
+      } else if (Math.abs(diffMinutes) < 60) {
+        return rtf.format(-diffMinutes, 'minute');
+      } else if (Math.abs(diffHours) < 24) {
+        return rtf.format(-diffHours, 'hour');
+      } else {
+        return rtf.format(-diffDays, 'day');
+      }
+    } catch {
+      return dateString;
+    }
+  }
+
+  private renderBrokersContent() {
+    if (this.brokersLoading) {
+      return html`<div class="empty-brokers"><sl-spinner></sl-spinner></div>`;
+    }
+
+    if (this.brokersError) {
+      return html`
+        <div class="sync-status error">
+          <sl-icon name="exclamation-triangle"></sl-icon>
+          ${this.brokersError}
+        </div>
+      `;
+    }
+
+    return html`
+      <p style="margin: 0 0 1rem 0; font-size: 0.8125rem; color: var(--scion-text-muted, #64748b);">
+        Runtime Brokers provide access to container runtime environments.
+      </p>
+      ${this.brokers.length === 0
+        ? html`
+            <div class="empty-brokers">
+              <sl-icon name="hdd-rack"></sl-icon>
+              <p>No runtime brokers are registered for this grove.</p>
+            </div>
+          `
+        : html`
+            <div class="broker-list">
+              ${this.brokers.map((broker) => this.renderBrokerItem(broker))}
+            </div>
+          `}
+    `;
+  }
+
+  private renderBrokerItem(broker: RuntimeBrokerWithProvider) {
+    const isDefault = this.grove?.defaultRuntimeBrokerId === broker.id;
+    const canEdit = canAny(this.grove!._capabilities, 'update', 'manage');
+
+    return html`
+      <div class="broker-item ${isDefault ? 'is-default' : ''}">
+        <span class="broker-status-dot ${broker.status}"></span>
+        <div class="broker-info">
+          <div class="broker-name-row">
+            <span class="broker-name">${broker.name}</span>
+            ${isDefault ? html`<span class="broker-default-badge">Default</span>` : ''}
+          </div>
+          <div class="broker-meta-row">
+            <span>${broker.status}</span>
+            <span>Last seen: ${this.formatRelativeTime(broker.lastHeartbeat)}</span>
+            ${broker.version ? html`<span>v${broker.version}</span>` : ''}
+          </div>
+          ${broker.profiles && broker.profiles.length > 0
+            ? html`
+                <div class="broker-profiles">
+                  ${broker.profiles.map(
+                    (p: BrokerProfile) => html`
+                      <span class="broker-profile-badge ${p.available ? 'available' : ''}">${p.name} (${p.type})</span>
+                    `
+                  )}
+                </div>
+              `
+            : ''}
+        </div>
+        ${canEdit
+          ? html`
+              <div class="broker-actions">
+                ${!isDefault
+                  ? html`
+                      <sl-tooltip content="Set as default">
+                        <sl-icon-button
+                          name="star"
+                          label="Set as default"
+                          @click=${() => this.handleSetDefaultBroker(broker.id)}
+                        ></sl-icon-button>
+                      </sl-tooltip>
+                    `
+                  : html`
+                      <sl-tooltip content="Default broker">
+                        <sl-icon-button
+                          name="star-fill"
+                          label="Default broker"
+                          style="color: var(--scion-primary, #3b82f6);"
+                          disabled
+                        ></sl-icon-button>
+                      </sl-tooltip>
+                    `}
+                <sl-tooltip content="Remove broker">
+                  <sl-icon-button
+                    name="trash"
+                    label="Remove"
+                    style="color: var(--sl-color-danger-600, #dc2626);"
+                    @click=${() => this.handleRemoveBroker(broker.id, broker.name)}
+                  ></sl-icon-button>
+                </sl-tooltip>
+              </div>
+            `
+          : ''}
       </div>
     `;
   }
