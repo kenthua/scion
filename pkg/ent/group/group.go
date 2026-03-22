@@ -46,8 +46,6 @@ const (
 	EdgeChildGroups = "child_groups"
 	// EdgeOwner holds the string denoting the owner edge name in mutations.
 	EdgeOwner = "owner"
-	// EdgeGrove holds the string denoting the grove edge name in mutations.
-	EdgeGrove = "grove"
 	// EdgePolicyBindings holds the string denoting the policy_bindings edge name in mutations.
 	EdgePolicyBindings = "policy_bindings"
 	// Table holds the table name of the group in the database.
@@ -70,13 +68,6 @@ const (
 	OwnerInverseTable = "users"
 	// OwnerColumn is the table column denoting the owner relation/edge.
 	OwnerColumn = "owner_id"
-	// GroveTable is the table that holds the grove relation/edge.
-	GroveTable = "groups"
-	// GroveInverseTable is the table name for the Grove entity.
-	// It exists in this package in order to avoid circular dependency with the "grove" package.
-	GroveInverseTable = "groves"
-	// GroveColumn is the table column denoting the grove relation/edge.
-	GroveColumn = "grove_id"
 	// PolicyBindingsTable is the table that holds the policy_bindings relation/edge.
 	PolicyBindingsTable = "policy_bindings"
 	// PolicyBindingsInverseTable is the table name for the PolicyBinding entity.
@@ -264,13 +255,6 @@ func ByOwnerField(field string, opts ...sql.OrderTermOption) OrderOption {
 	}
 }
 
-// ByGroveField orders the results by grove field.
-func ByGroveField(field string, opts ...sql.OrderTermOption) OrderOption {
-	return func(s *sql.Selector) {
-		sqlgraph.OrderByNeighborTerms(s, newGroveStep(), sql.OrderByField(field, opts...))
-	}
-}
-
 // ByPolicyBindingsCount orders the results by policy_bindings count.
 func ByPolicyBindingsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -310,13 +294,6 @@ func newOwnerStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(OwnerInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.M2O, true, OwnerTable, OwnerColumn),
-	)
-}
-func newGroveStep() *sqlgraph.Step {
-	return sqlgraph.NewStep(
-		sqlgraph.From(Table, FieldID),
-		sqlgraph.To(GroveInverseTable, FieldID),
-		sqlgraph.Edge(sqlgraph.M2O, true, GroveTable, GroveColumn),
 	)
 }
 func newPolicyBindingsStep() *sqlgraph.Step {

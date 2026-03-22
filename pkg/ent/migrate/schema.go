@@ -88,12 +88,12 @@ var (
 		{Name: "slug", Type: field.TypeString, Unique: true},
 		{Name: "description", Type: field.TypeString, Nullable: true},
 		{Name: "group_type", Type: field.TypeEnum, Enums: []string{"explicit", "grove_agents"}, Default: "explicit"},
+		{Name: "grove_id", Type: field.TypeUUID, Nullable: true},
 		{Name: "labels", Type: field.TypeJSON, Nullable: true},
 		{Name: "annotations", Type: field.TypeJSON, Nullable: true},
 		{Name: "created", Type: field.TypeTime},
 		{Name: "updated", Type: field.TypeTime},
 		{Name: "created_by", Type: field.TypeString, Nullable: true},
-		{Name: "grove_id", Type: field.TypeUUID, Nullable: true},
 		{Name: "owner_id", Type: field.TypeUUID, Nullable: true},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
@@ -102,12 +102,6 @@ var (
 		Columns:    GroupsColumns,
 		PrimaryKey: []*schema.Column{GroupsColumns[0]},
 		ForeignKeys: []*schema.ForeignKey{
-			{
-				Symbol:     "groups_groves_groups",
-				Columns:    []*schema.Column{GroupsColumns[10]},
-				RefColumns: []*schema.Column{GrovesColumns[0]},
-				OnDelete:   schema.SetNull,
-			},
 			{
 				Symbol:     "groups_users_owned_groups",
 				Columns:    []*schema.Column{GroupsColumns[11]},
@@ -287,8 +281,7 @@ func init() {
 	AgentsTable.ForeignKeys[0].RefTable = GrovesTable
 	AgentsTable.ForeignKeys[1].RefTable = UsersTable
 	AgentsTable.ForeignKeys[2].RefTable = UsersTable
-	GroupsTable.ForeignKeys[0].RefTable = GrovesTable
-	GroupsTable.ForeignKeys[1].RefTable = UsersTable
+	GroupsTable.ForeignKeys[0].RefTable = UsersTable
 	GroupMembershipsTable.ForeignKeys[0].RefTable = GroupsTable
 	GroupMembershipsTable.ForeignKeys[1].RefTable = UsersTable
 	GroupMembershipsTable.ForeignKeys[2].RefTable = AgentsTable

@@ -341,6 +341,26 @@ func GroveIDNotIn(vs ...uuid.UUID) predicate.Group {
 	return predicate.Group(sql.FieldNotIn(FieldGroveID, vs...))
 }
 
+// GroveIDGT applies the GT predicate on the "grove_id" field.
+func GroveIDGT(v uuid.UUID) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldGroveID, v))
+}
+
+// GroveIDGTE applies the GTE predicate on the "grove_id" field.
+func GroveIDGTE(v uuid.UUID) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldGroveID, v))
+}
+
+// GroveIDLT applies the LT predicate on the "grove_id" field.
+func GroveIDLT(v uuid.UUID) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldGroveID, v))
+}
+
+// GroveIDLTE applies the LTE predicate on the "grove_id" field.
+func GroveIDLTE(v uuid.UUID) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldGroveID, v))
+}
+
 // GroveIDIsNil applies the IsNil predicate on the "grove_id" field.
 func GroveIDIsNil() predicate.Group {
 	return predicate.Group(sql.FieldIsNull(FieldGroveID))
@@ -640,29 +660,6 @@ func HasOwner() predicate.Group {
 func HasOwnerWith(preds ...predicate.User) predicate.Group {
 	return predicate.Group(func(s *sql.Selector) {
 		step := newOwnerStep()
-		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
-			for _, p := range preds {
-				p(s)
-			}
-		})
-	})
-}
-
-// HasGrove applies the HasEdge predicate on the "grove" edge.
-func HasGrove() predicate.Group {
-	return predicate.Group(func(s *sql.Selector) {
-		step := sqlgraph.NewStep(
-			sqlgraph.From(Table, FieldID),
-			sqlgraph.Edge(sqlgraph.M2O, true, GroveTable, GroveColumn),
-		)
-		sqlgraph.HasNeighbors(s, step)
-	})
-}
-
-// HasGroveWith applies the HasEdge predicate on the "grove" edge with a given conditions (other predicates).
-func HasGroveWith(preds ...predicate.Grove) predicate.Group {
-	return predicate.Group(func(s *sql.Selector) {
-		step := newGroveStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

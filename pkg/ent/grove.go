@@ -49,11 +49,9 @@ type Grove struct {
 type GroveEdges struct {
 	// Agents holds the value of the agents edge.
 	Agents []*Agent `json:"agents,omitempty"`
-	// Groups holds the value of the groups edge.
-	Groups []*Group `json:"groups,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [2]bool
+	loadedTypes [1]bool
 }
 
 // AgentsOrErr returns the Agents value or an error if the edge
@@ -63,15 +61,6 @@ func (e GroveEdges) AgentsOrErr() ([]*Agent, error) {
 		return e.Agents, nil
 	}
 	return nil, &NotLoadedError{edge: "agents"}
-}
-
-// GroupsOrErr returns the Groups value or an error if the edge
-// was not loaded in eager-loading.
-func (e GroveEdges) GroupsOrErr() ([]*Group, error) {
-	if e.loadedTypes[1] {
-		return e.Groups, nil
-	}
-	return nil, &NotLoadedError{edge: "groups"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -189,11 +178,6 @@ func (_m *Grove) Value(name string) (ent.Value, error) {
 // QueryAgents queries the "agents" edge of the Grove entity.
 func (_m *Grove) QueryAgents() *AgentQuery {
 	return NewGroveClient(_m.config).QueryAgents(_m)
-}
-
-// QueryGroups queries the "groups" edge of the Grove entity.
-func (_m *Grove) QueryGroups() *GroupQuery {
-	return NewGroveClient(_m.config).QueryGroups(_m)
 }
 
 // Update returns a builder for updating this Grove.

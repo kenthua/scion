@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/ent"
+	"github.com/GoogleCloudPlatform/scion/pkg/ent/group"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/user"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -295,21 +296,34 @@ func TestGroupGroveEdge(t *testing.T) {
 		Save(ctx)
 	require.NoError(t, err)
 
-	// Create a grove_agents group linked to the grove
+	// Create a grove_agents group linked to the grove via grove_id field
 	grp, err := client.Group.Create().
 		SetName("my-grove-agents").
 		SetSlug("my-grove-agents").
 		SetGroupType("grove_agents").
-		SetGrove(gv).
+		SetGroveID(gv.ID).
 		Save(ctx)
 	require.NoError(t, err)
 	assert.NotNil(t, grp.GroveID)
+	assert.Equal(t, gv.ID, *grp.GroveID)
 
-	// Query groups from grove
-	groups, err := client.Grove.QueryGroups(gv).All(ctx)
+	// Create a second group for the same grove (members group)
+	grp2, err := client.Group.Create().
+		SetName("my-grove-members").
+		SetSlug("my-grove-members").
+		SetGroupType("explicit").
+		SetGroveID(gv.ID).
+		Save(ctx)
 	require.NoError(t, err)
-	require.Len(t, groups, 1)
-	assert.Equal(t, grp.ID, groups[0].ID)
+	assert.NotNil(t, grp2.GroveID)
+	assert.Equal(t, gv.ID, *grp2.GroveID)
+
+	// Query groups by grove_id field
+	groups, err := client.Group.Query().
+		Where(group.GroveIDEQ(gv.ID)).
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, groups, 2)
 }
 
 func TestAgentOwnerAndCreatorEdges(t *testing.T) {

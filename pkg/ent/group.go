@@ -11,7 +11,6 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/group"
-	"github.com/GoogleCloudPlatform/scion/pkg/ent/grove"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/user"
 	"github.com/google/uuid"
 )
@@ -59,13 +58,11 @@ type GroupEdges struct {
 	ChildGroups []*Group `json:"child_groups,omitempty"`
 	// Owner holds the value of the owner edge.
 	Owner *User `json:"owner,omitempty"`
-	// Grove holds the value of the grove edge.
-	Grove *Grove `json:"grove,omitempty"`
 	// PolicyBindings holds the value of the policy_bindings edge.
 	PolicyBindings []*PolicyBinding `json:"policy_bindings,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [6]bool
+	loadedTypes [5]bool
 }
 
 // MembershipsOrErr returns the Memberships value or an error if the edge
@@ -106,21 +103,10 @@ func (e GroupEdges) OwnerOrErr() (*User, error) {
 	return nil, &NotLoadedError{edge: "owner"}
 }
 
-// GroveOrErr returns the Grove value or an error if the edge
-// was not loaded in eager-loading, or loaded but was not found.
-func (e GroupEdges) GroveOrErr() (*Grove, error) {
-	if e.Grove != nil {
-		return e.Grove, nil
-	} else if e.loadedTypes[4] {
-		return nil, &NotFoundError{label: grove.Label}
-	}
-	return nil, &NotLoadedError{edge: "grove"}
-}
-
 // PolicyBindingsOrErr returns the PolicyBindings value or an error if the edge
 // was not loaded in eager-loading.
 func (e GroupEdges) PolicyBindingsOrErr() ([]*PolicyBinding, error) {
-	if e.loadedTypes[5] {
+	if e.loadedTypes[4] {
 		return e.PolicyBindings, nil
 	}
 	return nil, &NotLoadedError{edge: "policy_bindings"}
@@ -265,11 +251,6 @@ func (_m *Group) QueryChildGroups() *GroupQuery {
 // QueryOwner queries the "owner" edge of the Group entity.
 func (_m *Group) QueryOwner() *UserQuery {
 	return NewGroupClient(_m.config).QueryOwner(_m)
-}
-
-// QueryGrove queries the "grove" edge of the Group entity.
-func (_m *Group) QueryGrove() *GroveQuery {
-	return NewGroupClient(_m.config).QueryGrove(_m)
 }
 
 // QueryPolicyBindings queries the "policy_bindings" edge of the Group entity.

@@ -12,7 +12,6 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/agent"
-	"github.com/GoogleCloudPlatform/scion/pkg/ent/group"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/grove"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/predicate"
 	"github.com/google/uuid"
@@ -178,21 +177,6 @@ func (_u *GroveUpdate) AddAgents(v ...*Agent) *GroveUpdate {
 	return _u.AddAgentIDs(ids...)
 }
 
-// AddGroupIDs adds the "groups" edge to the Group entity by IDs.
-func (_u *GroveUpdate) AddGroupIDs(ids ...uuid.UUID) *GroveUpdate {
-	_u.mutation.AddGroupIDs(ids...)
-	return _u
-}
-
-// AddGroups adds the "groups" edges to the Group entity.
-func (_u *GroveUpdate) AddGroups(v ...*Group) *GroveUpdate {
-	ids := make([]uuid.UUID, len(v))
-	for i := range v {
-		ids[i] = v[i].ID
-	}
-	return _u.AddGroupIDs(ids...)
-}
-
 // Mutation returns the GroveMutation object of the builder.
 func (_u *GroveUpdate) Mutation() *GroveMutation {
 	return _u.mutation
@@ -217,27 +201,6 @@ func (_u *GroveUpdate) RemoveAgents(v ...*Agent) *GroveUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAgentIDs(ids...)
-}
-
-// ClearGroups clears all "groups" edges to the Group entity.
-func (_u *GroveUpdate) ClearGroups() *GroveUpdate {
-	_u.mutation.ClearGroups()
-	return _u
-}
-
-// RemoveGroupIDs removes the "groups" edge to Group entities by IDs.
-func (_u *GroveUpdate) RemoveGroupIDs(ids ...uuid.UUID) *GroveUpdate {
-	_u.mutation.RemoveGroupIDs(ids...)
-	return _u
-}
-
-// RemoveGroups removes "groups" edges to Group entities.
-func (_u *GroveUpdate) RemoveGroups(v ...*Group) *GroveUpdate {
-	ids := make([]uuid.UUID, len(v))
-	for i := range v {
-		ids[i] = v[i].ID
-	}
-	return _u.RemoveGroupIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -383,51 +346,6 @@ func (_u *GroveUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(agent.FieldID, field.TypeUUID),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_spec.Edges.Add = append(_spec.Edges.Add, edge)
-	}
-	if _u.mutation.GroupsCleared() {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.O2M,
-			Inverse: false,
-			Table:   grove.GroupsTable,
-			Columns: []string{grove.GroupsColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeUUID),
-			},
-		}
-		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
-	}
-	if nodes := _u.mutation.RemovedGroupsIDs(); len(nodes) > 0 && !_u.mutation.GroupsCleared() {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.O2M,
-			Inverse: false,
-			Table:   grove.GroupsTable,
-			Columns: []string{grove.GroupsColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeUUID),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
-	}
-	if nodes := _u.mutation.GroupsIDs(); len(nodes) > 0 {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.O2M,
-			Inverse: false,
-			Table:   grove.GroupsTable,
-			Columns: []string{grove.GroupsColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeUUID),
 			},
 		}
 		for _, k := range nodes {
@@ -602,21 +520,6 @@ func (_u *GroveUpdateOne) AddAgents(v ...*Agent) *GroveUpdateOne {
 	return _u.AddAgentIDs(ids...)
 }
 
-// AddGroupIDs adds the "groups" edge to the Group entity by IDs.
-func (_u *GroveUpdateOne) AddGroupIDs(ids ...uuid.UUID) *GroveUpdateOne {
-	_u.mutation.AddGroupIDs(ids...)
-	return _u
-}
-
-// AddGroups adds the "groups" edges to the Group entity.
-func (_u *GroveUpdateOne) AddGroups(v ...*Group) *GroveUpdateOne {
-	ids := make([]uuid.UUID, len(v))
-	for i := range v {
-		ids[i] = v[i].ID
-	}
-	return _u.AddGroupIDs(ids...)
-}
-
 // Mutation returns the GroveMutation object of the builder.
 func (_u *GroveUpdateOne) Mutation() *GroveMutation {
 	return _u.mutation
@@ -641,27 +544,6 @@ func (_u *GroveUpdateOne) RemoveAgents(v ...*Agent) *GroveUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveAgentIDs(ids...)
-}
-
-// ClearGroups clears all "groups" edges to the Group entity.
-func (_u *GroveUpdateOne) ClearGroups() *GroveUpdateOne {
-	_u.mutation.ClearGroups()
-	return _u
-}
-
-// RemoveGroupIDs removes the "groups" edge to Group entities by IDs.
-func (_u *GroveUpdateOne) RemoveGroupIDs(ids ...uuid.UUID) *GroveUpdateOne {
-	_u.mutation.RemoveGroupIDs(ids...)
-	return _u
-}
-
-// RemoveGroups removes "groups" edges to Group entities.
-func (_u *GroveUpdateOne) RemoveGroups(v ...*Group) *GroveUpdateOne {
-	ids := make([]uuid.UUID, len(v))
-	for i := range v {
-		ids[i] = v[i].ID
-	}
-	return _u.RemoveGroupIDs(ids...)
 }
 
 // Where appends a list predicates to the GroveUpdate builder.
@@ -837,51 +719,6 @@ func (_u *GroveUpdateOne) sqlSave(ctx context.Context) (_node *Grove, err error)
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(agent.FieldID, field.TypeUUID),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_spec.Edges.Add = append(_spec.Edges.Add, edge)
-	}
-	if _u.mutation.GroupsCleared() {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.O2M,
-			Inverse: false,
-			Table:   grove.GroupsTable,
-			Columns: []string{grove.GroupsColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeUUID),
-			},
-		}
-		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
-	}
-	if nodes := _u.mutation.RemovedGroupsIDs(); len(nodes) > 0 && !_u.mutation.GroupsCleared() {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.O2M,
-			Inverse: false,
-			Table:   grove.GroupsTable,
-			Columns: []string{grove.GroupsColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeUUID),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
-	}
-	if nodes := _u.mutation.GroupsIDs(); len(nodes) > 0 {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.O2M,
-			Inverse: false,
-			Table:   grove.GroupsTable,
-			Columns: []string{grove.GroupsColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeUUID),
 			},
 		}
 		for _, k := range nodes {

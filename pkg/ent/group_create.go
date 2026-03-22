@@ -12,7 +12,6 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/group"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/groupmembership"
-	"github.com/GoogleCloudPlatform/scion/pkg/ent/grove"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/policybinding"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/user"
 	"github.com/google/uuid"
@@ -211,11 +210,6 @@ func (_c *GroupCreate) SetOwner(v *User) *GroupCreate {
 	return _c.SetOwnerID(v.ID)
 }
 
-// SetGrove sets the "grove" edge to the Grove entity.
-func (_c *GroupCreate) SetGrove(v *Grove) *GroupCreate {
-	return _c.SetGroveID(v.ID)
-}
-
 // AddPolicyBindingIDs adds the "policy_bindings" edge to the PolicyBinding entity by IDs.
 func (_c *GroupCreate) AddPolicyBindingIDs(ids ...uuid.UUID) *GroupCreate {
 	_c.mutation.AddPolicyBindingIDs(ids...)
@@ -367,6 +361,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldGroupType, field.TypeEnum, value)
 		_node.GroupType = value
 	}
+	if value, ok := _c.mutation.GroveID(); ok {
+		_spec.SetField(group.FieldGroveID, field.TypeUUID, value)
+		_node.GroveID = &value
+	}
 	if value, ok := _c.mutation.Labels(); ok {
 		_spec.SetField(group.FieldLabels, field.TypeJSON, value)
 		_node.Labels = value
@@ -450,23 +448,6 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 			edge.Target.Nodes = append(edge.Target.Nodes, k)
 		}
 		_node.OwnerID = &nodes[0]
-		_spec.Edges = append(_spec.Edges, edge)
-	}
-	if nodes := _c.mutation.GroveIDs(); len(nodes) > 0 {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
-			Inverse: true,
-			Table:   group.GroveTable,
-			Columns: []string{group.GroveColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(grove.FieldID, field.TypeUUID),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_node.GroveID = &nodes[0]
 		_spec.Edges = append(_spec.Edges, edge)
 	}
 	if nodes := _c.mutation.PolicyBindingsIDs(); len(nodes) > 0 {

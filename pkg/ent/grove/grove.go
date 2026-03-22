@@ -37,8 +37,6 @@ const (
 	FieldVisibility = "visibility"
 	// EdgeAgents holds the string denoting the agents edge name in mutations.
 	EdgeAgents = "agents"
-	// EdgeGroups holds the string denoting the groups edge name in mutations.
-	EdgeGroups = "groups"
 	// Table holds the table name of the grove in the database.
 	Table = "groves"
 	// AgentsTable is the table that holds the agents relation/edge.
@@ -48,13 +46,6 @@ const (
 	AgentsInverseTable = "agents"
 	// AgentsColumn is the table column denoting the agents relation/edge.
 	AgentsColumn = "grove_id"
-	// GroupsTable is the table that holds the groups relation/edge.
-	GroupsTable = "groups"
-	// GroupsInverseTable is the table name for the Group entity.
-	// It exists in this package in order to avoid circular dependency with the "group" package.
-	GroupsInverseTable = "groups"
-	// GroupsColumn is the table column denoting the groups relation/edge.
-	GroupsColumn = "grove_id"
 )
 
 // Columns holds all SQL columns for grove fields.
@@ -160,31 +151,10 @@ func ByAgents(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newAgentsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
-
-// ByGroupsCount orders the results by groups count.
-func ByGroupsCount(opts ...sql.OrderTermOption) OrderOption {
-	return func(s *sql.Selector) {
-		sqlgraph.OrderByNeighborsCount(s, newGroupsStep(), opts...)
-	}
-}
-
-// ByGroups orders the results by groups terms.
-func ByGroups(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
-	return func(s *sql.Selector) {
-		sqlgraph.OrderByNeighborTerms(s, newGroupsStep(), append([]sql.OrderTerm{term}, terms...)...)
-	}
-}
 func newAgentsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(AgentsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, AgentsTable, AgentsColumn),
-	)
-}
-func newGroupsStep() *sqlgraph.Step {
-	return sqlgraph.NewStep(
-		sqlgraph.From(Table, FieldID),
-		sqlgraph.To(GroupsInverseTable, FieldID),
-		sqlgraph.Edge(sqlgraph.O2M, false, GroupsTable, GroupsColumn),
 	)
 }

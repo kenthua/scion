@@ -13,7 +13,6 @@ import (
 	"entgo.io/ent/schema/field"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/group"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/groupmembership"
-	"github.com/GoogleCloudPlatform/scion/pkg/ent/grove"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/policybinding"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/predicate"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/user"
@@ -235,11 +234,6 @@ func (_u *GroupUpdate) SetOwner(v *User) *GroupUpdate {
 	return _u.SetOwnerID(v.ID)
 }
 
-// SetGrove sets the "grove" edge to the Grove entity.
-func (_u *GroupUpdate) SetGrove(v *Grove) *GroupUpdate {
-	return _u.SetGroveID(v.ID)
-}
-
 // AddPolicyBindingIDs adds the "policy_bindings" edge to the PolicyBinding entity by IDs.
 func (_u *GroupUpdate) AddPolicyBindingIDs(ids ...uuid.UUID) *GroupUpdate {
 	_u.mutation.AddPolicyBindingIDs(ids...)
@@ -326,12 +320,6 @@ func (_u *GroupUpdate) RemoveChildGroups(v ...*Group) *GroupUpdate {
 // ClearOwner clears the "owner" edge to the User entity.
 func (_u *GroupUpdate) ClearOwner() *GroupUpdate {
 	_u.mutation.ClearOwner()
-	return _u
-}
-
-// ClearGrove clears the "grove" edge to the Grove entity.
-func (_u *GroupUpdate) ClearGrove() *GroupUpdate {
-	_u.mutation.ClearGrove()
 	return _u
 }
 
@@ -438,6 +426,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.GroupType(); ok {
 		_spec.SetField(group.FieldGroupType, field.TypeEnum, value)
+	}
+	if value, ok := _u.mutation.GroveID(); ok {
+		_spec.SetField(group.FieldGroveID, field.TypeUUID, value)
+	}
+	if _u.mutation.GroveIDCleared() {
+		_spec.ClearField(group.FieldGroveID, field.TypeUUID)
 	}
 	if value, ok := _u.mutation.Labels(); ok {
 		_spec.SetField(group.FieldLabels, field.TypeJSON, value)
@@ -617,35 +611,6 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeUUID),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_spec.Edges.Add = append(_spec.Edges.Add, edge)
-	}
-	if _u.mutation.GroveCleared() {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
-			Inverse: true,
-			Table:   group.GroveTable,
-			Columns: []string{group.GroveColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(grove.FieldID, field.TypeUUID),
-			},
-		}
-		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
-	}
-	if nodes := _u.mutation.GroveIDs(); len(nodes) > 0 {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
-			Inverse: true,
-			Table:   group.GroveTable,
-			Columns: []string{group.GroveColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(grove.FieldID, field.TypeUUID),
 			},
 		}
 		for _, k := range nodes {
@@ -920,11 +885,6 @@ func (_u *GroupUpdateOne) SetOwner(v *User) *GroupUpdateOne {
 	return _u.SetOwnerID(v.ID)
 }
 
-// SetGrove sets the "grove" edge to the Grove entity.
-func (_u *GroupUpdateOne) SetGrove(v *Grove) *GroupUpdateOne {
-	return _u.SetGroveID(v.ID)
-}
-
 // AddPolicyBindingIDs adds the "policy_bindings" edge to the PolicyBinding entity by IDs.
 func (_u *GroupUpdateOne) AddPolicyBindingIDs(ids ...uuid.UUID) *GroupUpdateOne {
 	_u.mutation.AddPolicyBindingIDs(ids...)
@@ -1011,12 +971,6 @@ func (_u *GroupUpdateOne) RemoveChildGroups(v ...*Group) *GroupUpdateOne {
 // ClearOwner clears the "owner" edge to the User entity.
 func (_u *GroupUpdateOne) ClearOwner() *GroupUpdateOne {
 	_u.mutation.ClearOwner()
-	return _u
-}
-
-// ClearGrove clears the "grove" edge to the Grove entity.
-func (_u *GroupUpdateOne) ClearGrove() *GroupUpdateOne {
-	_u.mutation.ClearGrove()
 	return _u
 }
 
@@ -1153,6 +1107,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.GroupType(); ok {
 		_spec.SetField(group.FieldGroupType, field.TypeEnum, value)
+	}
+	if value, ok := _u.mutation.GroveID(); ok {
+		_spec.SetField(group.FieldGroveID, field.TypeUUID, value)
+	}
+	if _u.mutation.GroveIDCleared() {
+		_spec.ClearField(group.FieldGroveID, field.TypeUUID)
 	}
 	if value, ok := _u.mutation.Labels(); ok {
 		_spec.SetField(group.FieldLabels, field.TypeJSON, value)
@@ -1332,35 +1292,6 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeUUID),
-			},
-		}
-		for _, k := range nodes {
-			edge.Target.Nodes = append(edge.Target.Nodes, k)
-		}
-		_spec.Edges.Add = append(_spec.Edges.Add, edge)
-	}
-	if _u.mutation.GroveCleared() {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
-			Inverse: true,
-			Table:   group.GroveTable,
-			Columns: []string{group.GroveColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(grove.FieldID, field.TypeUUID),
-			},
-		}
-		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
-	}
-	if nodes := _u.mutation.GroveIDs(); len(nodes) > 0 {
-		edge := &sqlgraph.EdgeSpec{
-			Rel:     sqlgraph.M2O,
-			Inverse: true,
-			Table:   group.GroveTable,
-			Columns: []string{group.GroveColumn},
-			Bidi:    false,
-			Target: &sqlgraph.EdgeTarget{
-				IDSpec: sqlgraph.NewFieldSpec(grove.FieldID, field.TypeUUID),
 			},
 		}
 		for _, k := range nodes {

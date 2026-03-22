@@ -13,7 +13,6 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/agent"
-	"github.com/GoogleCloudPlatform/scion/pkg/ent/group"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/grove"
 	"github.com/GoogleCloudPlatform/scion/pkg/ent/predicate"
 	"github.com/google/uuid"
@@ -27,7 +26,6 @@ type GroveQuery struct {
 	inters     []Interceptor
 	predicates []predicate.Grove
 	withAgents *AgentQuery
-	withGroups *GroupQuery
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -79,28 +77,6 @@ func (_q *GroveQuery) QueryAgents() *AgentQuery {
 			sqlgraph.From(grove.Table, grove.FieldID, selector),
 			sqlgraph.To(agent.Table, agent.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, grove.AgentsTable, grove.AgentsColumn),
-		)
-		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
-		return fromU, nil
-	}
-	return query
-}
-
-// QueryGroups chains the current query on the "groups" edge.
-func (_q *GroveQuery) QueryGroups() *GroupQuery {
-	query := (&GroupClient{config: _q.config}).Query()
-	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
-		if err := _q.prepareQuery(ctx); err != nil {
-			return nil, err
-		}
-		selector := _q.sqlQuery(ctx)
-		if err := selector.Err(); err != nil {
-			return nil, err
-		}
-		step := sqlgraph.NewStep(
-			sqlgraph.From(grove.Table, grove.FieldID, selector),
-			sqlgraph.To(group.Table, group.FieldID),
-			sqlgraph.Edge(sqlgraph.O2M, false, grove.GroupsTable, grove.GroupsColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -301,7 +277,6 @@ func (_q *GroveQuery) Clone() *GroveQuery {
 		inters:     append([]Interceptor{}, _q.inters...),
 		predicates: append([]predicate.Grove{}, _q.predicates...),
 		withAgents: _q.withAgents.Clone(),
-		withGroups: _q.withGroups.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -316,17 +291,6 @@ func (_q *GroveQuery) WithAgents(opts ...func(*AgentQuery)) *GroveQuery {
 		opt(query)
 	}
 	_q.withAgents = query
-	return _q
-}
-
-// WithGroups tells the query-builder to eager-load the nodes that are connected to
-// the "groups" edge. The optional arguments are used to configure the query builder of the edge.
-func (_q *GroveQuery) WithGroups(opts ...func(*GroupQuery)) *GroveQuery {
-	query := (&GroupClient{config: _q.config}).Query()
-	for _, opt := range opts {
-		opt(query)
-	}
-	_q.withGroups = query
 	return _q
 }
 
@@ -408,9 +372,8 @@ func (_q *GroveQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Grove,
 	var (
 		nodes       = []*Grove{}
 		_spec       = _q.querySpec()
-		loadedTypes = [2]bool{
+		loadedTypes = [1]bool{
 			_q.withAgents != nil,
-			_q.withGroups != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -435,13 +398,6 @@ func (_q *GroveQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*Grove,
 		if err := _q.loadAgents(ctx, query, nodes,
 			func(n *Grove) { n.Edges.Agents = []*Agent{} },
 			func(n *Grove, e *Agent) { n.Edges.Agents = append(n.Edges.Agents, e) }); err != nil {
-			return nil, err
-		}
-	}
-	if query := _q.withGroups; query != nil {
-		if err := _q.loadGroups(ctx, query, nodes,
-			func(n *Grove) { n.Edges.Groups = []*Group{} },
-			func(n *Grove, e *Group) { n.Edges.Groups = append(n.Edges.Groups, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -473,39 +429,6 @@ func (_q *GroveQuery) loadAgents(ctx context.Context, query *AgentQuery, nodes [
 		node, ok := nodeids[fk]
 		if !ok {
 			return fmt.Errorf(`unexpected referenced foreign-key "grove_id" returned %v for node %v`, fk, n.ID)
-		}
-		assign(node, n)
-	}
-	return nil
-}
-func (_q *GroveQuery) loadGroups(ctx context.Context, query *GroupQuery, nodes []*Grove, init func(*Grove), assign func(*Grove, *Group)) error {
-	fks := make([]driver.Value, 0, len(nodes))
-	nodeids := make(map[uuid.UUID]*Grove)
-	for i := range nodes {
-		fks = append(fks, nodes[i].ID)
-		nodeids[nodes[i].ID] = nodes[i]
-		if init != nil {
-			init(nodes[i])
-		}
-	}
-	if len(query.ctx.Fields) > 0 {
-		query.ctx.AppendFieldOnce(group.FieldGroveID)
-	}
-	query.Where(predicate.Group(func(s *sql.Selector) {
-		s.Where(sql.InValues(s.C(grove.GroupsColumn), fks...))
-	}))
-	neighbors, err := query.All(ctx)
-	if err != nil {
-		return err
-	}
-	for _, n := range neighbors {
-		fk := n.GroveID
-		if fk == nil {
-			return fmt.Errorf(`foreign-key "grove_id" is nil for node %v`, n.ID)
-		}
-		node, ok := nodeids[*fk]
-		if !ok {
-			return fmt.Errorf(`unexpected referenced foreign-key "grove_id" returned %v for node %v`, *fk, n.ID)
 		}
 		assign(node, n)
 	}

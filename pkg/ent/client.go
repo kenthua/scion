@@ -790,22 +790,6 @@ func (c *GroupClient) QueryOwner(_m *Group) *UserQuery {
 	return query
 }
 
-// QueryGrove queries the grove edge of a Group.
-func (c *GroupClient) QueryGrove(_m *Group) *GroveQuery {
-	query := (&GroveClient{config: c.config}).Query()
-	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
-		id := _m.ID
-		step := sqlgraph.NewStep(
-			sqlgraph.From(group.Table, group.FieldID, id),
-			sqlgraph.To(grove.Table, grove.FieldID),
-			sqlgraph.Edge(sqlgraph.M2O, true, group.GroveTable, group.GroveColumn),
-		)
-		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
-		return fromV, nil
-	}
-	return query
-}
-
 // QueryPolicyBindings queries the policy_bindings edge of a Group.
 func (c *GroupClient) QueryPolicyBindings(_m *Group) *PolicyBindingQuery {
 	query := (&PolicyBindingClient{config: c.config}).Query()
@@ -1145,22 +1129,6 @@ func (c *GroveClient) QueryAgents(_m *Grove) *AgentQuery {
 			sqlgraph.From(grove.Table, grove.FieldID, id),
 			sqlgraph.To(agent.Table, agent.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, grove.AgentsTable, grove.AgentsColumn),
-		)
-		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
-		return fromV, nil
-	}
-	return query
-}
-
-// QueryGroups queries the groups edge of a Grove.
-func (c *GroveClient) QueryGroups(_m *Grove) *GroupQuery {
-	query := (&GroupClient{config: c.config}).Query()
-	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
-		id := _m.ID
-		step := sqlgraph.NewStep(
-			sqlgraph.From(grove.Table, grove.FieldID, id),
-			sqlgraph.To(group.Table, group.FieldID),
-			sqlgraph.Edge(sqlgraph.O2M, false, grove.GroupsTable, grove.GroupsColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil

@@ -2699,6 +2699,7 @@ type GroupMutation struct {
 	slug                   *string
 	description            *string
 	group_type             *group.GroupType
+	grove_id               *uuid.UUID
 	labels                 *map[string]string
 	annotations            *map[string]string
 	created                *time.Time
@@ -2716,8 +2717,6 @@ type GroupMutation struct {
 	clearedchild_groups    bool
 	owner                  *uuid.UUID
 	clearedowner           bool
-	grove                  *uuid.UUID
-	clearedgrove           bool
 	policy_bindings        map[uuid.UUID]struct{}
 	removedpolicy_bindings map[uuid.UUID]struct{}
 	clearedpolicy_bindings bool
@@ -2989,12 +2988,12 @@ func (m *GroupMutation) ResetGroupType() {
 
 // SetGroveID sets the "grove_id" field.
 func (m *GroupMutation) SetGroveID(u uuid.UUID) {
-	m.grove = &u
+	m.grove_id = &u
 }
 
 // GroveID returns the value of the "grove_id" field in the mutation.
 func (m *GroupMutation) GroveID() (r uuid.UUID, exists bool) {
-	v := m.grove
+	v := m.grove_id
 	if v == nil {
 		return
 	}
@@ -3020,7 +3019,7 @@ func (m *GroupMutation) OldGroveID(ctx context.Context) (v *uuid.UUID, err error
 
 // ClearGroveID clears the value of the "grove_id" field.
 func (m *GroupMutation) ClearGroveID() {
-	m.grove = nil
+	m.grove_id = nil
 	m.clearedFields[group.FieldGroveID] = struct{}{}
 }
 
@@ -3032,7 +3031,7 @@ func (m *GroupMutation) GroveIDCleared() bool {
 
 // ResetGroveID resets all changes to the "grove_id" field.
 func (m *GroupMutation) ResetGroveID() {
-	m.grove = nil
+	m.grove_id = nil
 	delete(m.clearedFields, group.FieldGroveID)
 }
 
@@ -3493,33 +3492,6 @@ func (m *GroupMutation) ResetOwner() {
 	m.clearedowner = false
 }
 
-// ClearGrove clears the "grove" edge to the Grove entity.
-func (m *GroupMutation) ClearGrove() {
-	m.clearedgrove = true
-	m.clearedFields[group.FieldGroveID] = struct{}{}
-}
-
-// GroveCleared reports if the "grove" edge to the Grove entity was cleared.
-func (m *GroupMutation) GroveCleared() bool {
-	return m.GroveIDCleared() || m.clearedgrove
-}
-
-// GroveIDs returns the "grove" edge IDs in the mutation.
-// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
-// GroveID instead. It exists only for internal usage by the builders.
-func (m *GroupMutation) GroveIDs() (ids []uuid.UUID) {
-	if id := m.grove; id != nil {
-		ids = append(ids, *id)
-	}
-	return
-}
-
-// ResetGrove resets all changes to the "grove" edge.
-func (m *GroupMutation) ResetGrove() {
-	m.grove = nil
-	m.clearedgrove = false
-}
-
 // AddPolicyBindingIDs adds the "policy_bindings" edge to the PolicyBinding entity by ids.
 func (m *GroupMutation) AddPolicyBindingIDs(ids ...uuid.UUID) {
 	if m.policy_bindings == nil {
@@ -3621,7 +3593,7 @@ func (m *GroupMutation) Fields() []string {
 	if m.group_type != nil {
 		fields = append(fields, group.FieldGroupType)
 	}
-	if m.grove != nil {
+	if m.grove_id != nil {
 		fields = append(fields, group.FieldGroveID)
 	}
 	if m.labels != nil {
@@ -3916,7 +3888,7 @@ func (m *GroupMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *GroupMutation) AddedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 5)
 	if m.memberships != nil {
 		edges = append(edges, group.EdgeMemberships)
 	}
@@ -3928,9 +3900,6 @@ func (m *GroupMutation) AddedEdges() []string {
 	}
 	if m.owner != nil {
 		edges = append(edges, group.EdgeOwner)
-	}
-	if m.grove != nil {
-		edges = append(edges, group.EdgeGrove)
 	}
 	if m.policy_bindings != nil {
 		edges = append(edges, group.EdgePolicyBindings)
@@ -3964,10 +3933,6 @@ func (m *GroupMutation) AddedIDs(name string) []ent.Value {
 		if id := m.owner; id != nil {
 			return []ent.Value{*id}
 		}
-	case group.EdgeGrove:
-		if id := m.grove; id != nil {
-			return []ent.Value{*id}
-		}
 	case group.EdgePolicyBindings:
 		ids := make([]ent.Value, 0, len(m.policy_bindings))
 		for id := range m.policy_bindings {
@@ -3980,7 +3945,7 @@ func (m *GroupMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *GroupMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 5)
 	if m.removedmemberships != nil {
 		edges = append(edges, group.EdgeMemberships)
 	}
@@ -4030,7 +3995,7 @@ func (m *GroupMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *GroupMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 5)
 	if m.clearedmemberships {
 		edges = append(edges, group.EdgeMemberships)
 	}
@@ -4042,9 +4007,6 @@ func (m *GroupMutation) ClearedEdges() []string {
 	}
 	if m.clearedowner {
 		edges = append(edges, group.EdgeOwner)
-	}
-	if m.clearedgrove {
-		edges = append(edges, group.EdgeGrove)
 	}
 	if m.clearedpolicy_bindings {
 		edges = append(edges, group.EdgePolicyBindings)
@@ -4064,8 +4026,6 @@ func (m *GroupMutation) EdgeCleared(name string) bool {
 		return m.clearedchild_groups
 	case group.EdgeOwner:
 		return m.clearedowner
-	case group.EdgeGrove:
-		return m.clearedgrove
 	case group.EdgePolicyBindings:
 		return m.clearedpolicy_bindings
 	}
@@ -4078,9 +4038,6 @@ func (m *GroupMutation) ClearEdge(name string) error {
 	switch name {
 	case group.EdgeOwner:
 		m.ClearOwner()
-		return nil
-	case group.EdgeGrove:
-		m.ClearGrove()
 		return nil
 	}
 	return fmt.Errorf("unknown Group unique edge %s", name)
@@ -4101,9 +4058,6 @@ func (m *GroupMutation) ResetEdge(name string) error {
 		return nil
 	case group.EdgeOwner:
 		m.ResetOwner()
-		return nil
-	case group.EdgeGrove:
-		m.ResetGrove()
 		return nil
 	case group.EdgePolicyBindings:
 		m.ResetPolicyBindings()
@@ -4940,9 +4894,6 @@ type GroveMutation struct {
 	agents        map[uuid.UUID]struct{}
 	removedagents map[uuid.UUID]struct{}
 	clearedagents bool
-	groups        map[uuid.UUID]struct{}
-	removedgroups map[uuid.UUID]struct{}
-	clearedgroups bool
 	done          bool
 	oldValue      func(context.Context) (*Grove, error)
 	predicates    []predicate.Grove
@@ -5531,60 +5482,6 @@ func (m *GroveMutation) ResetAgents() {
 	m.removedagents = nil
 }
 
-// AddGroupIDs adds the "groups" edge to the Group entity by ids.
-func (m *GroveMutation) AddGroupIDs(ids ...uuid.UUID) {
-	if m.groups == nil {
-		m.groups = make(map[uuid.UUID]struct{})
-	}
-	for i := range ids {
-		m.groups[ids[i]] = struct{}{}
-	}
-}
-
-// ClearGroups clears the "groups" edge to the Group entity.
-func (m *GroveMutation) ClearGroups() {
-	m.clearedgroups = true
-}
-
-// GroupsCleared reports if the "groups" edge to the Group entity was cleared.
-func (m *GroveMutation) GroupsCleared() bool {
-	return m.clearedgroups
-}
-
-// RemoveGroupIDs removes the "groups" edge to the Group entity by IDs.
-func (m *GroveMutation) RemoveGroupIDs(ids ...uuid.UUID) {
-	if m.removedgroups == nil {
-		m.removedgroups = make(map[uuid.UUID]struct{})
-	}
-	for i := range ids {
-		delete(m.groups, ids[i])
-		m.removedgroups[ids[i]] = struct{}{}
-	}
-}
-
-// RemovedGroups returns the removed IDs of the "groups" edge to the Group entity.
-func (m *GroveMutation) RemovedGroupsIDs() (ids []uuid.UUID) {
-	for id := range m.removedgroups {
-		ids = append(ids, id)
-	}
-	return
-}
-
-// GroupsIDs returns the "groups" edge IDs in the mutation.
-func (m *GroveMutation) GroupsIDs() (ids []uuid.UUID) {
-	for id := range m.groups {
-		ids = append(ids, id)
-	}
-	return
-}
-
-// ResetGroups resets all changes to the "groups" edge.
-func (m *GroveMutation) ResetGroups() {
-	m.groups = nil
-	m.clearedgroups = false
-	m.removedgroups = nil
-}
-
 // Where appends a list predicates to the GroveMutation builder.
 func (m *GroveMutation) Where(ps ...predicate.Grove) {
 	m.predicates = append(m.predicates, ps...)
@@ -5904,12 +5801,9 @@ func (m *GroveMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *GroveMutation) AddedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 1)
 	if m.agents != nil {
 		edges = append(edges, grove.EdgeAgents)
-	}
-	if m.groups != nil {
-		edges = append(edges, grove.EdgeGroups)
 	}
 	return edges
 }
@@ -5924,24 +5818,15 @@ func (m *GroveMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
-	case grove.EdgeGroups:
-		ids := make([]ent.Value, 0, len(m.groups))
-		for id := range m.groups {
-			ids = append(ids, id)
-		}
-		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *GroveMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 1)
 	if m.removedagents != nil {
 		edges = append(edges, grove.EdgeAgents)
-	}
-	if m.removedgroups != nil {
-		edges = append(edges, grove.EdgeGroups)
 	}
 	return edges
 }
@@ -5956,24 +5841,15 @@ func (m *GroveMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
-	case grove.EdgeGroups:
-		ids := make([]ent.Value, 0, len(m.removedgroups))
-		for id := range m.removedgroups {
-			ids = append(ids, id)
-		}
-		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *GroveMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 1)
 	if m.clearedagents {
 		edges = append(edges, grove.EdgeAgents)
-	}
-	if m.clearedgroups {
-		edges = append(edges, grove.EdgeGroups)
 	}
 	return edges
 }
@@ -5984,8 +5860,6 @@ func (m *GroveMutation) EdgeCleared(name string) bool {
 	switch name {
 	case grove.EdgeAgents:
 		return m.clearedagents
-	case grove.EdgeGroups:
-		return m.clearedgroups
 	}
 	return false
 }
@@ -6004,9 +5878,6 @@ func (m *GroveMutation) ResetEdge(name string) error {
 	switch name {
 	case grove.EdgeAgents:
 		m.ResetAgents()
-		return nil
-	case grove.EdgeGroups:
-		m.ResetGroups()
 		return nil
 	}
 	return fmt.Errorf("unknown Grove edge %s", name)

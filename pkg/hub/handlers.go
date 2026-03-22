@@ -2514,85 +2514,24 @@ func (s *Server) createGroveGroup(ctx context.Context, grove *store.Grove) {
 	}
 	if err := s.store.CreateGroup(ctx, groveGroup); err != nil {
 		if !errors.Is(err, store.ErrAlreadyExists) {
-			slog.Warn("failed to create grove group", "grove_id", grove.ID, "error", err)
+			slog.Warn("failed to create grove group", "grove_id", grove.ID, "error", err.Error())
 			return
 		}
-		// Constraint conflict — look it up by slug
+		// Slug conflict — look it up and ensure grove_id is current
 		existing, lookupErr := s.store.GetGroupBySlug(ctx, agentsSlug)
 		if lookupErr != nil {
-			// Slug not found — constraint conflict is likely on grove_id
-			// (unique constraint from previous O2O ent schema). Find the
-			// phantom group and repurpose it.
-			existing = s.findOrCreateGroupForGrove(ctx, grove, agentsSlug,
-				grove.Name+" Agents", store.GroupTypeGroveAgents)
-			if existing == nil {
-				return
-			}
+			slog.Warn("failed to look up existing grove agents group by slug",
+				"grove_id", grove.ID, "slug", agentsSlug, "error", lookupErr.Error())
+			return
 		}
 		if existing.GroveID != grove.ID {
 			existing.GroveID = grove.ID
 			if updateErr := s.store.UpdateGroup(ctx, existing); updateErr != nil {
 				slog.Warn("failed to update existing grove agents group",
-					"grove_id", grove.ID, "slug", agentsSlug, "error", updateErr)
+					"grove_id", grove.ID, "slug", agentsSlug, "error", updateErr.Error())
 			}
 		}
 	}
-}
-
-// findOrCreateGroupForGrove handles the case where CreateGroup fails with
-// ErrAlreadyExists but the slug doesn't exist. This indicates a unique
-// constraint on grove_id (from a previous O2O ent schema). It finds the
-// existing phantom group via grove_id, updates its slug/name/type to match
-// what we need, and returns it. If no phantom group is found, it creates
-// the group without grove_id as a fallback. Returns nil on failure.
-func (s *Server) findOrCreateGroupForGrove(ctx context.Context, grove *store.Grove, slug, name, groupType string) *store.Group {
-	// Look for any existing group with this grove_id
-	result, err := s.store.ListGroups(ctx, store.GroupFilter{
-		GroveID: grove.ID,
-	}, store.ListOptions{Limit: 10})
-	if err == nil && result.TotalCount > 0 {
-		// Found existing group(s) with this grove_id. Look for one matching
-		// the desired type, or take the first one and repurpose it.
-		for _, g := range result.Items {
-			if g.GroupType == groupType {
-				slog.Info("found existing group by grove_id with matching type",
-					"grove_id", grove.ID, "group", g.ID, "slug", g.Slug, "type", groupType)
-				return &g
-			}
-		}
-		// No type match — update the slug of the first match
-		phantom := &result.Items[0]
-		slog.Info("repurposing phantom group found by grove_id",
-			"grove_id", grove.ID, "group", phantom.ID,
-			"oldSlug", phantom.Slug, "newSlug", slug, "type", groupType)
-		phantom.Slug = slug
-		phantom.Name = name
-		phantom.GroupType = groupType
-		if updateErr := s.store.UpdateGroup(ctx, phantom); updateErr != nil {
-			slog.Warn("failed to repurpose phantom group",
-				"grove_id", grove.ID, "group", phantom.ID, "error", updateErr)
-		}
-		return phantom
-	}
-
-	// No group found by grove_id — create without grove_id as fallback
-	slog.Warn("no phantom group found by grove_id — creating without grove_id",
-		"grove_id", grove.ID, "slug", slug)
-	newGroup := &store.Group{
-		ID:        api.NewUUID(),
-		Name:      name,
-		Slug:      slug,
-		GroupType: groupType,
-		CreatedBy: grove.CreatedBy,
-	}
-	if createErr := s.store.CreateGroup(ctx, newGroup); createErr != nil {
-		slog.Warn("fallback group creation also failed",
-			"grove_id", grove.ID, "slug", slug, "error", createErr)
-		return nil
-	}
-	slog.Info("created group without grove_id (unique constraint workaround)",
-		"grove_id", grove.ID, "group", newGroup.ID, "slug", slug)
-	return newGroup
 }
 
 // createGroveMembersGroupAndPolicy creates an explicit members group for a grove
@@ -2605,7 +2544,7 @@ func (s *Server) findOrCreateGroupForGrove(ctx context.Context, grove *store.Gro
 func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *store.Grove, callerUserID ...string) {
 	membersSlug := "grove:" + grove.Slug + ":members"
 
-	slog.Info("backfilling grove members group",
+	slog.Debug("ensuring grove members group",
 		"grove_id", grove.ID, "slug", grove.Slug, "membersSlug", membersSlug)
 
 	// Create grove members group, or look up the existing one
@@ -2619,22 +2558,15 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 	}
 	if err := s.store.CreateGroup(ctx, membersGroup); err != nil {
 		if !errors.Is(err, store.ErrAlreadyExists) {
-			slog.Warn("failed to create grove members group", "grove_id", grove.ID, "error", err)
+			slog.Warn("failed to create grove members group", "grove_id", grove.ID, "error", err.Error())
 			return
 		}
-		slog.Info("grove members group constraint conflict, looking up by slug",
-			"grove_id", grove.ID, "slug", membersSlug)
-		// Constraint conflict — look up by slug first
+		// Slug conflict — look up existing group
 		existing, lookupErr := s.store.GetGroupBySlug(ctx, membersSlug)
 		if lookupErr != nil {
-			// Slug not found — the constraint conflict is likely on grove_id
-			// (unique constraint from a previous O2O ent schema). Find the
-			// phantom group that holds this grove_id and repurpose it.
-			existing = s.findOrCreateGroupForGrove(ctx, grove, membersSlug,
-				grove.Name+" Members", store.GroupTypeExplicit)
-			if existing == nil {
-				return
-			}
+			slog.Warn("failed to look up existing grove members group by slug",
+				"grove_id", grove.ID, "slug", membersSlug, "error", lookupErr.Error())
+			return
 		}
 		membersGroup = existing
 		// Update the grove ID association in case it changed (recreated grove)
@@ -2642,7 +2574,7 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 			membersGroup.GroveID = grove.ID
 			if updateErr := s.store.UpdateGroup(ctx, membersGroup); updateErr != nil {
 				slog.Warn("failed to update existing grove members group grove ID",
-					"grove_id", grove.ID, "slug", membersSlug, "error", updateErr)
+					"grove_id", grove.ID, "slug", membersSlug, "error", updateErr.Error())
 			}
 		}
 	} else {
@@ -2659,7 +2591,7 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 			Role:       store.GroupMemberRoleOwner,
 		}); err != nil && !errors.Is(err, store.ErrAlreadyExists) {
 			slog.Warn("failed to add creator as owner of grove members group",
-				"grove_id", grove.ID, "user", grove.CreatedBy, "error", err)
+				"grove_id", grove.ID, "user", grove.CreatedBy, "error", err.Error())
 		}
 	}
 
@@ -2673,7 +2605,7 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 			Role:       store.GroupMemberRoleOwner,
 		}); err != nil && !errors.Is(err, store.ErrAlreadyExists) {
 			slog.Warn("failed to add caller as owner of grove members group",
-				"grove_id", grove.ID, "user", callerUserID[0], "error", err)
+				"grove_id", grove.ID, "user", callerUserID[0], "error", err.Error())
 		}
 	}
 
@@ -2687,7 +2619,7 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 			if promoteErr := s.store.UpdateGroupMemberRole(ctx, membersGroup.ID,
 				members[0].MemberType, members[0].MemberID, store.GroupMemberRoleOwner); promoteErr != nil {
 				slog.Warn("failed to promote sole member to owner",
-					"grove_id", grove.ID, "group", membersGroup.ID, "user", members[0].MemberID, "error", promoteErr)
+					"grove_id", grove.ID, "group", membersGroup.ID, "user", members[0].MemberID, "error", promoteErr.Error())
 			} else {
 				slog.Info("promoted sole grove member to owner",
 					"grove_id", grove.ID, "group", membersGroup.ID, "user", members[0].MemberID)
@@ -2710,7 +2642,7 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 	if err := s.store.CreatePolicy(ctx, policy); err != nil {
 		if !errors.Is(err, store.ErrAlreadyExists) {
 			slog.Warn("failed to create grove member policy",
-				"grove_id", grove.ID, "policy", policyName, "error", err)
+				"grove_id", grove.ID, "policy", policyName, "error", err.Error())
 			return
 		}
 		// Policy already exists — look it up and update its scope ID in case the
@@ -2726,7 +2658,7 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 			policy.ScopeID = grove.ID
 			if updateErr := s.store.UpdatePolicy(ctx, policy); updateErr != nil {
 				slog.Warn("failed to update existing grove member policy scope",
-					"grove_id", grove.ID, "policy", policyName, "error", updateErr)
+					"grove_id", grove.ID, "policy", policyName, "error", updateErr.Error())
 			}
 		}
 	}
@@ -2738,7 +2670,7 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 		PrincipalID:   membersGroup.ID,
 	}); err != nil && !errors.Is(err, store.ErrAlreadyExists) {
 		slog.Warn("failed to bind grove member policy",
-			"grove_id", grove.ID, "policy", policyName, "error", err)
+			"grove_id", grove.ID, "policy", policyName, "error", err.Error())
 	}
 }
 
@@ -2779,7 +2711,7 @@ func (s *Server) initHubNativeGrove(grove *store.Grove) error {
 	for key, value := range settingsUpdates {
 		if err := config.UpdateSetting(scionDir, key, value, false); err != nil {
 			slog.Warn("failed to update hub-native grove setting",
-				"grove_id", grove.ID, "key", key, "error", err)
+				"grove_id", grove.ID, "key", key, "error", err.Error())
 		}
 	}
 
@@ -2958,7 +2890,7 @@ func (s *Server) handleGroveRegister(w http.ResponseWriter, r *http.Request) {
 		if user := GetUserIdentityFromContext(ctx); user != nil {
 			callerID = user.ID()
 		}
-		slog.Info("backfilling groups for existing grove during register",
+		slog.Debug("ensuring groups for existing grove during register",
 			"grove_id", grove.ID, "slug", grove.Slug, "caller", callerID)
 		s.createGroveGroup(ctx, grove)
 		s.createGroveMembersGroupAndPolicy(ctx, grove, callerID)
@@ -3874,7 +3806,7 @@ func (s *Server) deleteGrove(w http.ResponseWriter, r *http.Request, id string) 
 	if groveGroups, err := s.store.ListGroups(ctx, store.GroupFilter{GroveID: id}, store.ListOptions{Limit: 100}); err == nil {
 		for _, g := range groveGroups.Items {
 			if delErr := s.store.DeleteGroup(ctx, g.ID); delErr != nil {
-				slog.Warn("failed to delete grove group", "grove_id", id, "group", g.ID, "slug", g.Slug, "error", delErr)
+				slog.Warn("failed to delete grove group", "grove_id", id, "group", g.ID, "slug", g.Slug, "error", delErr.Error())
 			}
 		}
 	}
@@ -3883,7 +3815,7 @@ func (s *Server) deleteGrove(w http.ResponseWriter, r *http.Request, id string) 
 	if grovePolicies, err := s.store.ListPolicies(ctx, store.PolicyFilter{ScopeType: "grove", ScopeID: id}, store.ListOptions{Limit: 100}); err == nil {
 		for _, p := range grovePolicies.Items {
 			if delErr := s.store.DeletePolicy(ctx, p.ID); delErr != nil {
-				slog.Warn("failed to delete grove policy", "grove_id", id, "policy", p.ID, "name", p.Name, "error", delErr)
+				slog.Warn("failed to delete grove policy", "grove_id", id, "policy", p.ID, "name", p.Name, "error", delErr.Error())
 			}
 		}
 	}
