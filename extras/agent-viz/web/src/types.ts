@@ -52,6 +52,12 @@ export interface AgentLifecycleEvent {
   agentId: string;
   name: string;
   action: 'create' | 'destroy';
+  requestedBy?: string;
+}
+
+export interface SnapshotMessage {
+  type: 'snapshot';
+  events: PlaybackEvent[];
 }
 
 export interface PlaybackCommand {
@@ -85,6 +91,8 @@ export interface GraphNode {
   // Visual state
   highlighted?: boolean;
   highlightTime?: number;
+  visible: boolean;
+  revealTime?: number;
 }
 
 export interface GraphLink {

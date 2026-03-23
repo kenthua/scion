@@ -3,6 +3,7 @@ import { FileGraph } from './graph';
 import { AgentRing } from './agents';
 import { MessageRenderer } from './messages';
 import { FileEditRenderer } from './files';
+import { DestroyBeamRenderer } from './destroy-beam';
 import { PlaybackControls } from './playback';
 import type {
   PlaybackManifest,
@@ -12,6 +13,7 @@ import type {
   MessageEvent,
   FileEditEvent,
   AgentLifecycleEvent,
+  SnapshotMessage,
 } from './types';
 
 // Main application state
@@ -19,6 +21,7 @@ let fileGraph: FileGraph;
 let agentRing: AgentRing;
 let messageRenderer: MessageRenderer;
 let fileEditRenderer: FileEditRenderer;
+let destroyBeamRenderer: DestroyBeamRenderer;
 let playbackControls: PlaybackControls;
 let overlayCanvas: HTMLCanvasElement;
 let overlayCtx: CanvasRenderingContext2D;
@@ -44,6 +47,8 @@ function init(): void {
   agentRing = new AgentRing();
   messageRenderer = new MessageRenderer();
   fileEditRenderer = new FileEditRenderer();
+  destroyBeamRenderer = new DestroyBeamRenderer();
+  fileEditRenderer.setFileGraph(fileGraph);
 
   // WebSocket
   const ws = new WSClient();
@@ -57,6 +62,9 @@ function init(): void {
           break;
         case 'status':
           playbackControls.updateStatus(msg as StatusUpdate);
+          break;
+        case 'snapshot':
+          handleSnapshot(msg as SnapshotMessage);
           break;
         case 'agent_state':
         case 'message':
@@ -122,22 +130,46 @@ function updateInfoDisplay(): void {
   }
 }
 
-function handleEvent(evt: PlaybackEvent): void {
+function handleSnapshot(snapshot: SnapshotMessage): void {
+  console.log('[agent-viz] Snapshot received with', snapshot.events.length, 'events');
+
+  // Reset all dynamic state
+  resetState();
+
+  // Replay all events instantly (no animations)
+  for (const evt of snapshot.events) {
+    handleEventInstant(evt);
+  }
+}
+
+function resetState(): void {
+  agentRing.reset();
+  fileGraph.reset();
+  messageRenderer.reset();
+  fileEditRenderer.reset();
+  destroyBeamRenderer.reset();
+
+  // Re-init empty state
+  const w = overlayCanvas.width;
+  const h = overlayCanvas.height;
+  agentRing.init([], w / 2, h / 2);
+}
+
+// Handle an event instantly without animations (used during snapshot replay)
+function handleEventInstant(evt: PlaybackEvent): void {
   switch (evt.type) {
     case 'agent_state':
       agentRing.updateState(evt.data as AgentStateEvent);
       break;
     case 'message':
-      messageRenderer.addMessage(evt.data as MessageEvent, agentRing);
+      // Skip message animations during replay
       break;
     case 'file_edit':
     case 'file_read': {
       const fileEvt = evt.data as FileEditEvent;
-      // Dynamically add file to graph if not already present
       if (fileEvt.filePath && !fileGraph.hasFile(fileEvt.filePath)) {
-        fileGraph.addFile(fileEvt.filePath);
+        fileGraph.addFile(fileEvt.filePath, true); // visible immediately during replay
       }
-      fileEditRenderer.addFileEdit(fileEvt, agentRing, fileGraph);
       break;
     }
     case 'agent_create': {
@@ -175,6 +207,78 @@ function handleEvent(evt: PlaybackEvent): void {
   }
 }
 
+function handleEvent(evt: PlaybackEvent): void {
+  switch (evt.type) {
+    case 'agent_state':
+      agentRing.updateState(evt.data as AgentStateEvent);
+      break;
+    case 'message':
+      messageRenderer.addMessage(evt.data as MessageEvent, agentRing);
+      break;
+    case 'file_edit':
+    case 'file_read': {
+      const fileEvt = evt.data as FileEditEvent;
+      // Dynamically add file to graph if not already present
+      if (fileEvt.filePath && !fileGraph.hasFile(fileEvt.filePath)) {
+        // For create actions, file starts invisible; for edits/reads it's visible
+        const visible = fileEvt.action !== 'create';
+        fileGraph.addFile(fileEvt.filePath, visible);
+      }
+      fileEditRenderer.addFileEdit(fileEvt, agentRing, fileGraph);
+      break;
+    }
+    case 'agent_create': {
+      const lifecycle = evt.data as AgentLifecycleEvent;
+      const agentInManifest = manifest?.agents.find(
+        (a) => a.id === lifecycle.agentId || a.name === lifecycle.name
+      );
+      if (agentInManifest) {
+        agentRing.addAgent(agentInManifest);
+      } else {
+        agentRing.addAgent({
+          id: lifecycle.agentId,
+          name: lifecycle.name || lifecycle.agentId.substring(0, 8),
+          harness: 'unknown',
+          color: '#888',
+        });
+      }
+      agentRing.updateState({
+        agentId: lifecycle.agentId,
+        phase: 'created',
+        activity: 'idle',
+      });
+      break;
+    }
+    case 'agent_destroy': {
+      const lifecycle = evt.data as AgentLifecycleEvent;
+
+      // If we know who requested the destroy, show a laser beam
+      if (lifecycle.requestedBy) {
+        destroyBeamRenderer.addBeam(
+          lifecycle.requestedBy,
+          lifecycle.name || lifecycle.agentId,
+          agentRing
+        );
+      }
+
+      agentRing.updateState({
+        agentId: lifecycle.agentId,
+        phase: 'stopped',
+        activity: 'completed',
+      });
+      // Delay the actual removal slightly so the beam animation has time to show
+      if (lifecycle.requestedBy) {
+        setTimeout(() => {
+          agentRing.removeAgent(lifecycle.agentId);
+        }, 800);
+      } else {
+        agentRing.removeAgent(lifecycle.agentId);
+      }
+      break;
+    }
+  }
+}
+
 function handleResize(): void {
   const w = window.innerWidth;
   const h = window.innerHeight - 60; // reserve space for controls
@@ -198,6 +302,9 @@ function animate(): void {
 
   // Draw file edit particles
   fileEditRenderer.draw(overlayCtx);
+
+  // Draw destroy beams
+  destroyBeamRenderer.draw(overlayCtx);
 
   animFrameId = requestAnimationFrame(animate);
 }

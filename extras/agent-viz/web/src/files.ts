@@ -12,10 +12,16 @@ interface ActiveParticle {
   action: 'create' | 'edit' | 'read';
   startTime: number;
   filePath: string;
+  revealed: boolean; // whether we've triggered file reveal
 }
 
 export class FileEditRenderer {
   private particles: ActiveParticle[] = [];
+  private fileGraph: FileGraph | null = null;
+
+  setFileGraph(fg: FileGraph): void {
+    this.fileGraph = fg;
+  }
 
   addFileEdit(
     event: FileEditEvent,
@@ -54,10 +60,17 @@ export class FileEditRenderer {
       action: event.action,
       startTime: Date.now(),
       filePath: event.filePath,
+      revealed: false,
     });
 
-    // Highlight the file in the graph
-    fileGraph.highlightFile(event.filePath);
+    // Highlight the file in the graph (only if already visible)
+    if (event.action !== 'create') {
+      fileGraph.highlightFile(event.filePath);
+    }
+  }
+
+  reset(): void {
+    this.particles = [];
   }
 
   draw(ctx: CanvasRenderingContext2D): void {
@@ -72,6 +85,15 @@ export class FileEditRenderer {
       const elapsed = now - particle.startTime;
 
       const isRead = particle.action === 'read';
+
+      // Trigger file reveal when create particle arrives at destination
+      if (particle.action === 'create' && !particle.revealed && elapsed >= PARTICLE_DURATION) {
+        particle.revealed = true;
+        if (this.fileGraph) {
+          this.fileGraph.revealFile(particle.filePath);
+          this.fileGraph.highlightFile(particle.filePath);
+        }
+      }
 
       if (elapsed < PARTICLE_DURATION) {
         // Particle traveling
@@ -121,7 +143,7 @@ export class FileEditRenderer {
           ctx.shadowBlur = 0;
         }
       } else if (particle.action === 'create') {
-        // Materialize effect for new files
+        // Materialize effect for new files - expanding ring at the file location
         const mt = (elapsed - PARTICLE_DURATION) / MATERIALIZE_DURATION;
         const scale = Math.min(1, mt * 1.2);
         const alpha = 1 - mt;

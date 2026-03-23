@@ -7,6 +7,7 @@ const ROOT_RADIUS = 10;
 const DIR_RADIUS = 6;
 const FILE_RADIUS = 3;
 const HIGHLIGHT_DURATION = 3000; // ms
+const REVEAL_DURATION = 400; // ms for file materialize animation
 
 export class FileGraph {
   private graph: ForceGraphInstance;
@@ -44,6 +45,7 @@ export class FileGraph {
         isDir: f.isDir,
         parent: f.parent,
         highlighted: false,
+        visible: true,
       };
       this.nodes.set(f.id, node);
       graphNodes.push(node);
@@ -66,7 +68,7 @@ export class FileGraph {
     }, 2000);
   }
 
-  addFile(filePath: string): void {
+  addFile(filePath: string, visible = false): void {
     if (this.nodes.has(filePath)) return;
 
     // Ensure root node exists
@@ -77,7 +79,7 @@ export class FileGraph {
 
     // Ensure parent directories exist
     if (parent !== '.' && !this.nodes.has(parent)) {
-      this.addFile(parent + '/'); // trigger directory creation
+      this.addFile(parent + '/', true); // directories are visible immediately
     }
 
     const isDir = filePath.endsWith('/');
@@ -95,6 +97,7 @@ export class FileGraph {
       isDir,
       parent: actualParent,
       highlighted: false,
+      visible: visible || isDir, // directories always visible immediately
     };
     this.nodes.set(id, node);
 
@@ -119,6 +122,7 @@ export class FileGraph {
       isDir: true,
       parent: '',
       highlighted: false,
+      visible: true,
     };
     this.nodes.set('.', root);
     const { nodes, links } = this.graph.graphData();
@@ -127,6 +131,14 @@ export class FileGraph {
 
   hasFile(filePath: string): boolean {
     return this.nodes.has(filePath);
+  }
+
+  revealFile(filePath: string): void {
+    const node = this.nodes.get(filePath);
+    if (node && !node.visible) {
+      node.visible = true;
+      node.revealTime = Date.now();
+    }
   }
 
   highlightFile(filePath: string): void {
@@ -155,15 +167,36 @@ export class FileGraph {
     return null;
   }
 
+  reset(): void {
+    this.nodes.clear();
+    this.graph.graphData({ nodes: [], links: [] });
+  }
+
   resize(width: number, height: number): void {
     this.graph.width(width).height(height);
   }
 
   private drawNode(node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number): void {
+    // Skip invisible nodes
+    if (!node.visible) return;
+
     const isRoot = node.id === '.';
     const r = isRoot ? ROOT_RADIUS : node.isDir ? DIR_RADIUS : FILE_RADIUS;
     const x = node.x ?? 0;
     const y = node.y ?? 0;
+
+    // Reveal animation (scale-in when file materializes)
+    let revealScale = 1;
+    if (node.revealTime) {
+      const elapsed = Date.now() - node.revealTime;
+      if (elapsed < REVEAL_DURATION) {
+        const t = elapsed / REVEAL_DURATION;
+        // Elastic ease for a "pop" appearance
+        revealScale = elasticOut(t);
+      } else {
+        node.revealTime = undefined;
+      }
+    }
 
     // Check highlight fade
     let alpha = 1;
@@ -178,6 +211,14 @@ export class FileGraph {
       }
     }
 
+    const scaledR = r * revealScale;
+    if (scaledR < 0.1) return;
+
+    ctx.save();
+    if (revealScale < 1) {
+      ctx.globalAlpha = Math.min(1, revealScale * 2);
+    }
+
     // Glow effect
     if (glowing) {
       ctx.save();
@@ -185,7 +226,7 @@ export class FileGraph {
       ctx.shadowBlur = 15;
       ctx.shadowColor = '#4fc3f7';
       ctx.beginPath();
-      ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+      ctx.arc(x, y, scaledR + 4, 0, Math.PI * 2);
       ctx.fillStyle = '#4fc3f7';
       ctx.fill();
       ctx.restore();
@@ -193,7 +234,7 @@ export class FileGraph {
 
     // Node circle
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.arc(x, y, scaledR, 0, Math.PI * 2);
     if (isRoot) {
       ctx.fillStyle = glowing ? '#fff176' : '#ffa726';
     } else if (node.isDir) {
@@ -209,17 +250,20 @@ export class FileGraph {
     ctx.stroke();
 
     // Label (root always visible, others when zoomed in)
-    if (isRoot || globalScale > 1.5) {
+    if ((isRoot || globalScale > 1.5) && revealScale > 0.5) {
       const fontSize = isRoot ? Math.max(5, 12 / globalScale) : Math.max(3, 10 / globalScale);
       ctx.font = `${isRoot ? 'bold ' : ''}${fontSize}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillStyle = isRoot ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.7)';
-      ctx.fillText(node.name, x, y + r + 2);
+      ctx.fillText(node.name, x, y + scaledR + 2);
     }
+
+    ctx.restore();
   }
 
   private drawNodeArea(node: GraphNode, color: string, ctx: CanvasRenderingContext2D): void {
+    if (!node.visible) return;
     const r = node.isDir ? DIR_RADIUS : FILE_RADIUS;
     ctx.beginPath();
     ctx.arc(node.x ?? 0, node.y ?? 0, r + 2, 0, Math.PI * 2);
@@ -232,4 +276,10 @@ export class FileGraph {
     if (idx <= 0) return '.';
     return path.substring(0, idx);
   }
+}
+
+function elasticOut(t: number): number {
+  if (t === 0 || t === 1) return t;
+  const p = 0.4;
+  return Math.pow(2, -10 * t) * Math.sin(((t - p / 4) * (2 * Math.PI)) / p) + 1;
 }

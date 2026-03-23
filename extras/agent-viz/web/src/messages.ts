@@ -31,6 +31,10 @@ export class MessageRenderer {
     });
   }
 
+  reset(): void {
+    this.activeMessages = [];
+  }
+
   draw(ctx: CanvasRenderingContext2D): void {
     const now = Date.now();
     const totalDuration = PULSE_DURATION + FADE_DURATION;

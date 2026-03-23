@@ -162,6 +162,10 @@ export class AgentRing {
     return '#888';
   }
 
+  reset(): void {
+    this.agents.clear();
+  }
+
   draw(ctx: CanvasRenderingContext2D): void {
     this.animationPhase = (Date.now() / 1000) % (2 * Math.PI);
     const now = Date.now();
