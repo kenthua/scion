@@ -2523,6 +2523,13 @@ func (s *Server) createGrove(w http.ResponseWriter, r *http.Request) {
 	// Create grove members group and policy (best-effort)
 	s.createGroveMembersGroupAndPolicy(ctx, grove)
 
+	// For git groves, try to auto-associate a GitHub App installation so that
+	// clone/pull operations can mint tokens. This covers the case where the app
+	// was installed before the grove was created (webhook already fired).
+	if grove.GitRemote != "" && grove.GitHubInstallationID == nil {
+		s.autoAssociateGitHubInstallation(ctx, grove)
+	}
+
 	// Initialize filesystem workspace for hub-native groves and shared-workspace git groves.
 	if grove.IsSharedWorkspace() {
 		// Shared-workspace git grove: clone the repository into the workspace.
@@ -2846,6 +2853,50 @@ func (s *Server) cloneSharedWorkspaceGrove(ctx context.Context, grove *store.Gro
 	}
 
 	return nil
+}
+
+// autoAssociateGitHubInstallation searches active GitHub App installations for one
+// that covers the grove's repository. If found, it sets GitHubInstallationID on the
+// grove and persists the association. This handles the case where a GitHub App was
+// installed (and its webhook processed) before the grove was created.
+func (s *Server) autoAssociateGitHubInstallation(ctx context.Context, grove *store.Grove) {
+	ownerRepo := extractOwnerRepo(grove.GitRemote)
+	if ownerRepo == "" {
+		return
+	}
+
+	installations, err := s.store.ListGitHubInstallations(ctx, store.GitHubInstallationFilter{
+		Status: store.GitHubInstallationStatusActive,
+	})
+	if err != nil {
+		slog.Warn("failed to list GitHub App installations for auto-association",
+			"grove_id", grove.ID, "error", err)
+		return
+	}
+
+	ownerRepoLower := strings.ToLower(ownerRepo)
+	for _, inst := range installations {
+		for _, repo := range inst.Repositories {
+			if strings.ToLower(repo) == ownerRepoLower {
+				installID := inst.InstallationID
+				grove.GitHubInstallationID = &installID
+				grove.GitHubAppStatus = &store.GitHubAppGroveStatus{
+					State:       store.GitHubAppStateUnchecked,
+					LastChecked: timeNow(),
+				}
+				if err := s.store.UpdateGrove(ctx, grove); err != nil {
+					slog.Warn("failed to persist GitHub App installation association",
+						"grove_id", grove.ID, "installation_id", installID, "error", err)
+				} else {
+					slog.Info("auto-associated grove with GitHub App installation at creation time",
+						"grove_id", grove.ID, "grove_name", grove.Name,
+						"installation_id", installID, "account", inst.AccountLogin)
+					s.events.PublishGroveUpdated(ctx, grove)
+				}
+				return
+			}
+		}
+	}
 }
 
 // resolveCloneToken resolves a GitHub token for cloning a grove's repository.

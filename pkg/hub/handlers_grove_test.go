@@ -1962,3 +1962,119 @@ func TestResolveCloneToken_NoCredentials(t *testing.T) {
 	token := srv.resolveCloneToken(context.Background(), grove)
 	assert.Empty(t, token, "should return empty when no credentials available")
 }
+
+func TestCreateGrove_AutoAssociatesGitHubInstallation(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	// Pre-register a GitHub App installation that covers "myorg/myrepo"
+	inst := &store.GitHubInstallation{
+		InstallationID: 77777,
+		AccountLogin:   "myorg",
+		AccountType:    "Organization",
+		AppID:          1,
+		Repositories:   []string{"myorg/myrepo"},
+		Status:         store.GitHubInstallationStatusActive,
+	}
+	require.NoError(t, st.CreateGitHubInstallation(ctx, inst))
+
+	// Create a grove whose git remote matches the installation's repo.
+	// Use a local git repo as clone source so the clone actually succeeds.
+	sourceDir := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test.com"},
+		{"config", "user.name", "Test"},
+		{"commit", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = sourceDir
+		require.NoError(t, cmd.Run(), "git %v", args)
+	}
+
+	body := CreateGroveRequest{
+		Name:          "Auto Assoc Grove",
+		GitRemote:     "github.com/myorg/myrepo",
+		WorkspaceMode: "shared",
+		Labels: map[string]string{
+			"scion.dev/clone-url":      sourceDir,
+			"scion.dev/default-branch": "master",
+		},
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves", body)
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+
+	var grove store.Grove
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&grove))
+
+	// Clean up the cloned workspace
+	workspacePath, err := hubNativeGrovePath(grove.Slug)
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(workspacePath) })
+
+	// Verify the grove was auto-associated with the installation
+	updated, err := st.GetGrove(ctx, grove.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.GitHubInstallationID,
+		"grove should be auto-associated with GitHub App installation")
+	assert.Equal(t, int64(77777), *updated.GitHubInstallationID)
+}
+
+func TestAutoAssociateGitHubInstallation_NoMatch(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	// Register an installation that covers a different repo
+	inst := &store.GitHubInstallation{
+		InstallationID: 88888,
+		AccountLogin:   "otherorg",
+		AccountType:    "Organization",
+		AppID:          1,
+		Repositories:   []string{"otherorg/otherrepo"},
+		Status:         store.GitHubInstallationStatusActive,
+	}
+	require.NoError(t, st.CreateGitHubInstallation(ctx, inst))
+
+	grove := &store.Grove{
+		ID:        "grove-no-match",
+		Name:      "No Match",
+		Slug:      "no-match",
+		GitRemote: "github.com/myorg/myrepo",
+	}
+	require.NoError(t, st.CreateGrove(ctx, grove))
+
+	srv.autoAssociateGitHubInstallation(ctx, grove)
+
+	assert.Nil(t, grove.GitHubInstallationID,
+		"grove should not be associated when no installation matches")
+}
+
+func TestAutoAssociateGitHubInstallation_SkipsSuspended(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	// Register a suspended installation that covers the repo
+	inst := &store.GitHubInstallation{
+		InstallationID: 99999,
+		AccountLogin:   "myorg",
+		AccountType:    "Organization",
+		AppID:          1,
+		Repositories:   []string{"myorg/myrepo"},
+		Status:         store.GitHubInstallationStatusSuspended,
+	}
+	require.NoError(t, st.CreateGitHubInstallation(ctx, inst))
+
+	grove := &store.Grove{
+		ID:        "grove-suspended",
+		Name:      "Suspended",
+		Slug:      "suspended",
+		GitRemote: "github.com/myorg/myrepo",
+	}
+	require.NoError(t, st.CreateGrove(ctx, grove))
+
+	srv.autoAssociateGitHubInstallation(ctx, grove)
+
+	assert.Nil(t, grove.GitHubInstallationID,
+		"grove should not be associated with a suspended installation")
+}
