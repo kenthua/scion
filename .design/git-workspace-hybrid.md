@@ -159,17 +159,11 @@ This combines the benefits of both models:
 
 ### 3.1 Grove Type Modeling
 
-**Open Question: Third type vs. sub-type of git grove?**
-
-A git URI as a grove identifier is central to the type and model across the system. This makes modeling the hybrid as a **sub-type of git grove** (rather than an entirely new top-level type) the preferred direction.
-
-#### Option 1: Sub-type via label (Recommended)
-
-The hybrid is a git grove with an additional label indicating workspace mode:
+The hybrid is modeled as a **sub-type of git grove** via a label, not a new top-level type. A git URI as a grove identifier is central to the type and model across the system, and the hybrid is fundamentally a git grove with a different workspace strategy.
 
 - **Data model:** A grove with `gitRemote` set AND `scion.dev/workspace-mode: shared`.
 - **GroveType stays `git`** — no new top-level type. Code that checks `GroveType == "git"` continues to work.
-- **Sub-type differentiation** uses the label where behavior diverges.
+- **Sub-type differentiation** uses the label only where behavior diverges (clone vs. mount, worktree creation, workspace file management).
 
 ```go
 // Check workspace mode where behavior differs:
@@ -178,45 +172,11 @@ func (g *Grove) IsSharedWorkspace() bool {
 }
 ```
 
-**Pros:**
+**Rationale:**
 - Git URI remains the primary type discriminator.
 - Existing code that handles git groves (remote display, credential provisioning, branch UI) works without modification.
-- Fewer places to update — only the divergent paths (clone vs. mount, worktree creation) need to check the sub-type.
+- Fewer places to update — only the divergent paths need to check the sub-type.
 - Cleaner extension path — future sub-modes (e.g., per-agent worktrees from Alternative A) add more label values, not more top-level types.
-
-**Cons:**
-- Risk of code that handles git groves assuming per-agent clone behavior without checking the label.
-- Label-based differentiation is less discoverable than a distinct type value.
-
-#### Option 2: New top-level type (`git-shared`)
-
-Extend `ComputeGroveType()` to return a fourth value:
-
-```go
-func (g *Grove) ComputeGroveType() string {
-    if g.GitRemote != "" {
-        if g.Labels["scion.dev/workspace-mode"] == "shared" {
-            return "git-shared"
-        }
-        if hasLinkedProvider {
-            return "linked"
-        }
-        return "git"
-    }
-    return "hub-native"
-}
-```
-
-**Pros:**
-- Explicit — every switch/case on grove type handles the new mode or fails visibly.
-- No risk of git-grove code silently applying wrong behavior.
-
-**Cons:**
-- Every existing `switch` on GroveType needs updating, even where behavior is identical to `git`.
-- Breaks the principle that a git URI is the primary type signal.
-- Scales poorly — each future sub-mode becomes another top-level type.
-
-**Recommendation:** Option 1 (sub-type via label). The hybrid is fundamentally a git grove with a different workspace strategy, not a different kind of grove. Code paths where behavior diverges are limited (bootstrap, agent provisioning, workspace file management) and can check `IsSharedWorkspace()`.
 
 ### 3.2 Bootstrap: Host-Side Cloning
 
@@ -585,7 +545,7 @@ The branch name field on the new-agent form adapts its default based on workspac
 |---|----------|--------|----------|
 | 1 | **Workspace model?** | Resolved | Shared workspace (Alternative B). Simplest model, matches hub-native mental model. |
 | 2 | **Retain per-agent clone?** | Resolved | Yes. Per-agent clone remains the default. Shared workspace is a sub-mode choice. |
-| 3 | **Type modeling?** | Open | Prefer sub-type of git grove (via label) over new top-level type. See Section 3.1 for pros/cons. |
+| 3 | **Type modeling?** | Resolved | Sub-type of git grove via `scion.dev/workspace-mode` label. GroveType remains `"git"`. See Section 3.1 for rationale. |
 | 4 | **Clone mechanism?** | Resolved | Host-side clone by Hub/broker. Simpler, faster, better error handling than bootstrap container. |
 | 5 | **Credential storage?** | Resolved | Per-agent `$HOME/.gitconfig` credential helper using `GITHUB_TOKEN`. No credentials in workspace. Same pattern as clone-based agents. |
 | 6 | **Token refresh?** | Resolved | Conforms with existing git grove agent token management. No new infrastructure. |
