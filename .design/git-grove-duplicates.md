@@ -163,11 +163,13 @@ New flow:
 
 ### 3.7 Preserve Clone vs Shared Workspace Modes
 
-Both workspace strategies continue to work unchanged:
-- **Shared workspace (local):** Agents share a bind-mounted worktree from the host.
-- **Clone (hub-first):** Agents clone the repository at startup.
+All three workspace strategies (represented as three modes at the model layer) continue to work unchanged:
 
-The workspace strategy is determined by grove configuration, not by the number of groves sharing a URL.
+- **Per-agent clone** (`GitClone` set, `SharedWorkspace=false`): Each agent in a git grove clones the repository independently inside its container. This is the default for git groves.
+- **Shared workspace clone** (`GitClone` unset, `SharedWorkspace=true`, `Workspace` set): A single shared git clone is mounted by all agents in the grove, rather than each agent cloning independently.
+- **Hub-native workspace** (`GitClone` unset, `SharedWorkspace=false`, `Workspace` set): Non-git groves with a hub-managed filesystem.
+
+The workspace strategy is determined by grove configuration (specifically the `scion.dev/workspace-mode` label), not by the number of groves sharing a URL. Multiple groves sharing the same git remote may each independently choose their own workspace strategy.
 
 ---
 
@@ -213,8 +215,18 @@ When `matches` has more than one entry, the client should prompt the user to cho
 GetGrovesByGitRemote(ctx context.Context, gitRemote string) ([]*Grove, error)
 ```
 
-**Modified method:**
-`GetGroveByGitRemote` is retained for backward compatibility but may return the first match (by creation date) when multiple exist. Callers that need all matches use `GetGrovesByGitRemote`.
+**New method (for GitHub App token sourcing):**
+```go
+// GetInstallationForRepository returns an active GitHub App installation
+// that covers the given repository (owner/repo format).
+// Returns ErrNotFound if no matching installation exists.
+GetInstallationForRepository(ctx context.Context, repoFullName string) (*GitHubInstallation, error)
+```
+
+**Deprecated method:**
+`GetGroveByGitRemote` (singular) is **removed from the interface**. All callers are migrated:
+- `handleGroveRegister()` → uses `GetGrovesByGitRemote()` (plural)
+- `handleGroveSyncTemplates()` → uses `GetInstallationForRepository()`
 
 ---
 
@@ -284,41 +296,71 @@ GetGrovesByGitRemote(ctx context.Context, gitRemote string) ([]*Grove, error)
 
 ### Q1: Should `GetGroveByGitRemote` return the "primary" grove?
 
-When multiple groves share a git remote, `GetGroveByGitRemote` currently returns a single grove. After removing the UNIQUE constraint, it could return:
-- The oldest (first created) grove — preserves backward compatibility for existing integrations.
-- An error requiring callers to use `GetGrovesByGitRemote` — forces explicit handling.
+**Resolved:** No. `GetGroveByGitRemote` (singular) will be **deprecated and removed**. Returning one arbitrary grove when many match introduces unpredictable behavior. All callers will be migrated:
 
-**Proposed answer:** Return the oldest grove. This preserves backward compatibility for the `EnsureHubReady` flow where a broker auto-links to a grove. New code paths should use `GetGrovesByGitRemote`.
+| Caller | Current Usage | Migration Path |
+|--------|---------------|----------------|
+| `handleGroveRegister()` | Falls back to git remote lookup after ID lookup fails | Use `GetGrovesByGitRemote()` (plural) to get all matches, return the list in the response for client-side disambiguation |
+| `handleGroveSyncTemplates()` | Looks up a grove by git remote to find a GitHub App installation for token sourcing | Migrate to look up the `github_installations` table directly by repository name (see Q4), bypassing grove lookup entirely |
+| `useraccesstoken_test.go` | Mock returning `ErrNotFound` | Update mock to implement `GetGrovesByGitRemote()` |
+
+The new `GetGrovesByGitRemote()` (plural) is the only git-remote-based lookup. Code paths that need a single grove should use ID-based or slug-based lookups instead.
 
 ### Q2: Should the serial suffix be on the slug only, or also the display name?
 
-Options:
-- Slug only: name="acme-widgets", slug="acme-widgets-2" — cleaner display but potentially confusing.
-- Both: name="acme-widgets-2", slug="acme-widgets-2" — consistent but less friendly.
-- Name with qualifier: name="acme-widgets (2)", slug="acme-widgets-2" — best of both.
+**Resolved:** Use the "name with qualifier" pattern. When a grove is created as a duplicate:
+- **Slug:** `acme-widgets-2` (serial-numbered, URL-safe)
+- **Display name:** `acme-widgets (2)` (parenthesized qualifier, human-friendly)
 
-**Proposed answer:** The user should be prompted to provide a distinct display name. The serial-numbered slug is offered as a default, but the name field remains user-editable. If not explicitly set, name defaults to match the slug.
-
+Users who want more control can provide a custom display name at creation time, overriding the default. The slug remains auto-generated and enforced unique.
 ### Q3: How should `EnsureHubReady` behave with multiple matches?
 
-The auto-sync flow (`EnsureHubReady`) currently finds a grove by ID or git remote and auto-links. With multiple groves per remote, it needs a disambiguation strategy:
-- If the local `grove_id` matches a hub grove ID exactly: use that grove (unchanged).
-- If the local `hub.groveId` setting is set: use that grove (unchanged).
-- If neither matches but git remote matches multiple groves: prompt the user (extending current name-match behavior).
+**Resolved:** Move to **get-by-ID as the universal pattern**. The lookup chain becomes:
 
-**Proposed answer:** Use the existing disambiguation flow. The prompt already handles multiple matches by name — extend it to also trigger for multiple git remote matches.
+1. If the local `hub.groveId` setting is set: look up by ID (definitive, unchanged).
+2. If the local `grove_id` matches a hub grove ID exactly: use that grove (unchanged).
+3. If neither matches: trigger the disambiguation prompt (showing all groves matching by git remote or name), including the "Register as new" option.
+
+The key change is that ID-based lookup is always preferred. Git-remote-based auto-linking (which assumed a single match) is removed from the auto-sync path. Once a user selects or creates a grove through the disambiguation prompt, the `hub.groveId` is persisted locally, and subsequent syncs use the fast ID path.
 
 ### Q4: Impact on GitHub App integration?
 
-The GitHub App installation is tied to a grove record. With multiple groves per repo, should the GitHub App installation be shared or per-grove?
+**Resolved:** GitHub App installations are **per-repository, shared across groves**.
 
-**Proposed answer:** Per-grove. Each grove independently configures its GitHub App integration. This is consistent with groves being independent workspaces.
+GitHub App installations are fundamentally tied to a repository (or organization), not to a project-level concept like a grove. The existing `github_installations` table already stores installations independently with a `repositories` list. The `grove.github_installation_id` foreign key is the per-grove link.
+
+**Current behavior that works well with multi-grove:**
+- `autoAssociateGitHubInstallation()` already matches installations to groves by comparing the grove's `git_remote` against the installation's `repositories` list.
+- `matchGrovesToInstallation()` (webhook handler) iterates all groves and matches by repository — this naturally handles multiple groves for the same repo.
+
+**Changes needed:**
+- `autoAssociateGitHubInstallation()` must be called for each newly created grove, even when other groves for the same remote already exist. This already works — no change needed.
+- `handleGroveSyncTemplates()` currently looks up a grove by git remote to find a GitHub App installation for token sourcing. This should be migrated to query the `github_installations` table directly by repository name, removing the indirect grove-based lookup. (See new Q6.)
+- Per-grove fields (`github_permissions`, `github_app_status`) remain per-grove, since each grove may request different permission scopes or have independent health status.
+
+**No schema changes required** — the existing one-to-many relationship (one installation, many groves referencing it via `github_installation_id`) is already the correct model.
 
 ### Q5: Should we add a `UNIQUE` constraint on `slug` in this migration?
 
-The Ent schema declares `slug` as `Unique()`, but the SQLite implementation only has a non-unique index. This is a pre-existing bug. Should this migration fix it?
+**Resolved:** Yes. This migration adds the proper `UNIQUE` constraint on `slug`, fixing the pre-existing discrepancy between the Ent schema (which declares `Unique()`) and the SQLite implementation (which only has a non-unique index). This is tech debt that should be fixed alongside the `git_remote` constraint change since both require the same table-recreation migration pattern.
 
-**Proposed answer:** Yes. This migration should add the proper UNIQUE constraint on `slug`, fixing the existing discrepancy and ensuring the serial-numbering logic is actually enforced at the database level.
+### Q6: How should `handleGroveSyncTemplates` find GitHub tokens without `GetGroveByGitRemote`?
+
+Currently, `handleGroveSyncTemplates()` looks up a grove by git remote to find one with a `GitHubInstallationID` for token-based cloning of external template repos. With `GetGroveByGitRemote` being deprecated, this needs a new approach.
+
+**Options:**
+
+1. **Query `github_installations` directly by repository name.** Add a store method like `GetInstallationForRepository(ctx, repoFullName)` that searches the `repositories` JSON array in `github_installations`. This removes the indirection through groves entirely.
+2. **Use `GetGrovesByGitRemote` (plural) and pick the first with a valid installation.** Simpler migration but still couples installation lookup to groves.
+3. **Use the grove's own installation if available, fall back to option 1.** The calling grove may already have an installation for a different repo under the same org.
+
+**Proposed answer:** Option 1 — query installations directly. The intent of the lookup is "find a GitHub token that can access this repo," not "find a grove." The `github_installations.repositories` column already contains the needed data. This also simplifies the code and removes a non-obvious coupling between template syncing and grove lookup.
+
+### Q7: Should the `@branch` qualifier interact with multi-grove?
+
+The existing `@branch` qualifier (e.g., `github.com/acme/widgets@release/v2`) produces a different normalized remote, which means it already creates a "separate" grove namespace. With the new multi-grove support, a user could create multiple groves for the same URL-plus-branch combination. Should the two mechanisms be kept independent, or should `@branch` be subsumed into multi-grove?
+
+**Proposed answer:** Keep them independent. The `@branch` qualifier serves a distinct semantic purpose (branch-locked groves) and is orthogonal to team-based isolation. A grove with `@release/v2` has a different normalized remote and thus doesn't conflict with unqualified groves. Users can create multiple groves for `github.com/acme/widgets@release/v2` if needed, using the same serial slug mechanism.
 
 ---
 
@@ -344,14 +386,16 @@ If this change needs to be reverted, groves that were created as duplicates (sha
 
 ### Phase 1: Schema and Store Layer
 
-**Goal:** Remove the 1:1 constraint and add slug uniqueness enforcement.
+**Goal:** Remove the 1:1 constraint, add slug uniqueness enforcement, and migrate store interface.
 
 1. **Database migration:** Drop UNIQUE constraint on `git_remote`, add UNIQUE constraint on `slug`.
 2. **New store method:** `GetGrovesByGitRemote()` returning `[]*Grove`.
-3. **Update `GetGroveByGitRemote()`:** Return oldest match when multiple exist.
-4. **Update Ent schema:** Remove `Unique()` from `git_remote` field.
-5. **Slug validation helper:** `NextAvailableSlug(ctx, baseSlug) string` that queries existing slugs and returns the next serial-numbered variant.
-6. **Tests:** Store-level tests for multi-grove-per-remote scenarios, slug uniqueness enforcement, and serial numbering.
+3. **New store method:** `GetInstallationForRepository()` for direct GitHub installation lookup by repository name.
+4. **Remove `GetGroveByGitRemote()`:** Delete from interface and implementation. Migrate all callers (see Q1).
+5. **Update Ent schema:** Remove `Unique()` from `git_remote` field.
+6. **Slug validation helper:** `NextAvailableSlug(ctx, baseSlug) string` that queries existing slugs and returns the next serial-numbered variant.
+7. **Name generation:** Default display name uses parenthesized qualifier (e.g., `acme-widgets (2)`) when serial suffix is applied.
+8. **Tests:** Store-level tests for multi-grove-per-remote scenarios, slug uniqueness enforcement, serial numbering, and installation-by-repo lookup.
 
 ### Phase 2: Grove ID Generation
 
@@ -366,15 +410,16 @@ If this change needs to be reverted, groves that were created as duplicates (sha
 
 ### Phase 3: Registration and Linking Flow
 
-**Goal:** Support creating new groves for URLs that already have groves.
+**Goal:** Support creating new groves for URLs that already have groves, with ID-based lookup as the universal pattern.
 
-1. **Update `handleGroveRegister()`:** When git remote matches multiple groves, return the match list in the response. When exactly one match, preserve current auto-link behavior.
+1. **Update `handleGroveRegister()`:** Use `GetGrovesByGitRemote()` (plural). When git remote matches multiple groves, return the match list in the response. When exactly one match, preserve current auto-link behavior.
 2. **Update `RegisterGroveResponse`:** Add `Matches []GroveMatch` field.
-3. **Update `ShowMatchingGrovesPrompt()`:** Remove `hasGitRemote` parameter. Always show "Register as new grove" option. Show proposed serial-numbered slug.
+3. **Update `ShowMatchingGrovesPrompt()`:** Remove `hasGitRemote` parameter. Always show "Register as new grove" option. Show proposed serial-numbered slug and default display name with qualifier.
 4. **Update `runHubLink()`:** Handle multiple git remote matches by showing the disambiguation prompt.
-5. **Update `EnsureHubReady()`:** When git remote matches multiple groves, trigger the disambiguation prompt (same as name-match flow).
-6. **Serial slug display:** Show the next available slug in the "Register as new" option.
-7. **Tests:** End-to-end linking flow with multiple groves per remote.
+5. **Update `EnsureHubReady()`:** Prioritize `hub.groveId` and `grove_id` for ID-based lookup. Remove git-remote-based auto-linking. When no ID matches, trigger the disambiguation prompt (showing all matches by git remote or name). Persist `hub.groveId` after selection so subsequent syncs use the fast ID path.
+6. **Update `handleGroveSyncTemplates()`:** Replace `GetGroveByGitRemote` call with `GetInstallationForRepository()` for GitHub token sourcing.
+7. **Serial slug display:** Show the next available slug in the "Register as new" option.
+8. **Tests:** End-to-end linking flow with multiple groves per remote.
 
 ### Phase 4: CLI and Hub-First Creation
 
@@ -388,7 +433,7 @@ If this change needs to be reverted, groves that were created as duplicates (sha
 ### Phase 5: Cleanup and Documentation
 
 1. **Audit all callers of `HashGroveID()`:** Ensure none rely on it for grove ID generation.
-2. **Audit all callers of `GetGroveByGitRemote()`:** Ensure they handle the possibility of the "first match" behavior correctly, or switch to `GetGrovesByGitRemote()`.
+2. **Verify `GetGroveByGitRemote()` is fully removed:** Confirm no remaining references in code, tests, or mocks.
 3. **Update design docs:** Mark `git-groves.md` section 2.2 as superseded by this design.
 4. **Update test fixtures:** Any test that assumes git remote uniqueness or deterministic IDs.
 
@@ -398,16 +443,19 @@ If this change needs to be reverted, groves that were created as duplicates (sha
 
 | File | Change |
 |------|--------|
-| `pkg/store/sqlite/sqlite.go` | Migration: drop UNIQUE on git_remote, add UNIQUE on slug. New `GetGrovesByGitRemote()`. |
-| `pkg/store/store.go` | Add `GetGrovesByGitRemote()` to interface. |
+| `pkg/store/sqlite/sqlite.go` | Migration: drop UNIQUE on git_remote, add UNIQUE on slug. New `GetGrovesByGitRemote()`. Remove `GetGroveByGitRemote()`. |
+| `pkg/store/sqlite/github_installation.go` | New `GetInstallationForRepository()` implementation. |
+| `pkg/store/store.go` | Add `GetGrovesByGitRemote()` and `GetInstallationForRepository()` to interface. Remove `GetGroveByGitRemote()`. |
 | `pkg/store/models.go` | No structural changes. |
 | `pkg/ent/schema/grove.go` | Remove `.Unique()` from `git_remote` field. |
 | `pkg/ent/migrate/schema.go` | Update generated migration schema. |
 | `pkg/config/init.go` | Simplify `GenerateGroveID()` / `GenerateGroveIDForDir()`. |
-| `pkg/hub/handlers.go` | Update `createGrove()`, `handleGroveRegister()`. |
-| `pkg/hubsync/prompt.go` | Update `ShowMatchingGrovesPrompt()` — remove `hasGitRemote` param, show serial slug. |
-| `pkg/hubsync/sync.go` | Update `EnsureHubReady()` for multi-match handling. |
+| `pkg/hub/handlers.go` | Update `createGrove()`, `handleGroveRegister()`, `handleGroveSyncTemplates()`. |
+| `pkg/hubsync/prompt.go` | Update `ShowMatchingGrovesPrompt()` — remove `hasGitRemote` param, show serial slug and display name with qualifier. |
+| `pkg/hubsync/sync.go` | Update `EnsureHubReady()` — ID-based lookup as universal pattern, remove git-remote auto-linking. |
 | `cmd/hub.go` | Update `runHubLink()`, `scion hub grove create`. |
 | `pkg/util/git.go` | No changes to `HashGroveID()` itself, but callers change. |
 | `pkg/hub/handlers_grove_test.go` | Update tests for new behavior. |
+| `pkg/hub/useraccesstoken_test.go` | Update mock to remove `GetGroveByGitRemote()`, add `GetGrovesByGitRemote()`. |
+| `pkg/store/sqlite/sqlite_test.go` | Update tests: remove single-match test, add multi-match and installation-by-repo tests. |
 | `pkg/util/git_test.go` | Update/add tests. |
