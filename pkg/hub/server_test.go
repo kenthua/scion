@@ -18,9 +18,11 @@ package hub
 
 import (
 	"context"
+	"encoding/base64"
 	"testing"
 	"time"
 
+	"github.com/GoogleCloudPlatform/scion/pkg/store"
 	"github.com/GoogleCloudPlatform/scion/pkg/store/sqlite"
 )
 
@@ -69,6 +71,89 @@ func TestServer_PersistentSigningKeys(t *testing.T) {
 	}
 	if string(userKey1) != string(userKey2) {
 		t.Errorf("user signing keys do not match: %x != %x", userKey1, userKey2)
+	}
+}
+
+func TestServer_PersistentSigningKeys_WithHubID(t *testing.T) {
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	cfg := DefaultServerConfig()
+	cfg.HubID = "test-hub-123"
+
+	srv1 := New(cfg, s)
+	t.Cleanup(func() { srv1.Shutdown(context.Background()) })
+	if srv1.agentTokenService == nil {
+		t.Fatal("agentTokenService not initialized")
+	}
+
+	key1 := srv1.agentTokenService.config.SigningKey
+	userKey1 := srv1.userTokenService.config.SigningKey
+
+	// Second server with same hubID should get the same keys
+	srv2 := New(cfg, s)
+	t.Cleanup(func() { srv2.Shutdown(context.Background()) })
+
+	if string(key1) != string(srv2.agentTokenService.config.SigningKey) {
+		t.Error("agent signing keys should match with same hubID")
+	}
+	if string(userKey1) != string(srv2.userTokenService.config.SigningKey) {
+		t.Error("user signing keys should match with same hubID")
+	}
+}
+
+func TestServer_SigningKeyMigration_LegacyHubScopeID(t *testing.T) {
+	// Simulate the pre-hubID-namespacing scenario where keys were stored
+	// with ScopeID="hub". A new server with a real hubID should find them
+	// via the migration fallback.
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	// First: create a server with no hubID (legacy behavior stores with empty ScopeID,
+	// but we manually store with "hub" to simulate the pre-refactor state)
+	cfg := DefaultServerConfig()
+	legacySrv := New(cfg, s)
+	t.Cleanup(func() { legacySrv.Shutdown(context.Background()) })
+
+	legacyAgentKey := legacySrv.agentTokenService.config.SigningKey
+	legacyUserKey := legacySrv.userTokenService.config.SigningKey
+
+	// Manually re-save the keys with ScopeID="hub" (simulating pre-refactor storage)
+	ctx := context.Background()
+	agentEncoded := base64.StdEncoding.EncodeToString(legacyAgentKey)
+	userEncoded := base64.StdEncoding.EncodeToString(legacyUserKey)
+
+	// Store under old "hub" scope
+	_, _ = s.UpsertSecret(ctx, &store.Secret{
+		ID: "hub-agent_signing_key", Key: SecretKeyAgentSigningKey,
+		EncryptedValue: agentEncoded, Scope: store.ScopeHub, ScopeID: "hub",
+	})
+	_, _ = s.UpsertSecret(ctx, &store.Secret{
+		ID: "hub-user_signing_key", Key: SecretKeyUserSigningKey,
+		EncryptedValue: userEncoded, Scope: store.ScopeHub, ScopeID: "hub",
+	})
+
+	// Now create a server with an actual hubID — it should migrate from "hub"
+	cfg2 := DefaultServerConfig()
+	cfg2.HubID = "my-new-hub-id"
+	srv2 := New(cfg2, s)
+	t.Cleanup(func() { srv2.Shutdown(context.Background()) })
+
+	if string(legacyAgentKey) != string(srv2.agentTokenService.config.SigningKey) {
+		t.Error("agent signing key should be migrated from legacy 'hub' scope")
+	}
+	if string(legacyUserKey) != string(srv2.userTokenService.config.SigningKey) {
+		t.Error("user signing key should be migrated from legacy 'hub' scope")
 	}
 }
 

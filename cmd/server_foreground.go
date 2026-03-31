@@ -605,6 +605,7 @@ func parseAdminEmails(cfg *config.GlobalConfig) []string {
 // initHubServer creates and configures the Hub server.
 func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store, hubEndpoint, devAuthToken string, adminEmailList []string, adminMode bool, maintenanceMessage string, requestLogger, messageLogger *slog.Logger, globalDir string, pluginMgr *scionplugin.Manager) *hub.Server {
 	hubCfg := hub.ServerConfig{
+		HubID:                 cfg.Hub.ResolveHubID(),
 		Port:                  cfg.Hub.Port,
 		Host:                  cfg.Hub.Host,
 		ReadTimeout:           cfg.Hub.ReadTimeout,
@@ -721,9 +722,8 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 	// Initialize storage
 	initHubStorage(ctx, hubSrv, cfg, globalDir)
 
-	// Resolve hub instance ID for secret namespacing
-	hubID := cfg.Hub.ResolveHubID()
-	hubSrv.SetHubID(hubID)
+	// Hub ID was already resolved and set during initHubServer via ServerConfig.HubID
+	hubID := hubSrv.HubID()
 	log.Printf("Hub instance ID: %s", hubID)
 
 	// Initialize secret backend

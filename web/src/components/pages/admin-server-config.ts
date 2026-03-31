@@ -1942,6 +1942,7 @@ export class ScionPageAdminServerConfig extends LitElement {
     try {
       const res = await apiFetch('/api/v1/github-app');
       if (res.ok) {
+        this.githubAppError = null;
         const data = (await res.json()) as GitHubAppConfigData;
         this.githubAppConfigured = data.configured;
         this.githubAppId = data.app_id;
@@ -1965,6 +1966,11 @@ export class ScionPageAdminServerConfig extends LitElement {
         // Clear write-only fields after load
         this.githubAppPrivateKey = '';
         this.githubAppWebhookSecret = '';
+      } else {
+        this.githubAppError = await extractApiError(
+          res,
+          'Failed to load GitHub App configuration',
+        );
       }
     } catch (e) {
       // Non-critical — tab just shows unconfigured state

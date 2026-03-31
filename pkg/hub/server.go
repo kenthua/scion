@@ -113,6 +113,9 @@ type ServerConfig struct {
 	MaxSubscriptionsPerUser int
 	// GitHubAppConfig holds the GitHub App configuration for agent git authentication.
 	GitHubAppConfig GitHubAppServerConfig
+	// HubID is the unique hub instance ID used for secret namespacing.
+	// If empty, secrets are looked up/stored with an empty scope ID.
+	HubID string
 }
 
 // GitHubAppServerConfig holds the GitHub App configuration for the Hub server.
@@ -498,6 +501,7 @@ func New(cfg ServerConfig, s store.Store) *Server {
 		startTime:   time.Now(),
 		events:      noopEventPublisher{},
 		maintenance: NewMaintenanceState(cfg.AdminMode, cfg.MaintenanceMessage),
+		hubID:       cfg.HubID,
 
 		// Subsystem loggers
 		agentLifecycleLog: logging.Subsystem("hub.agent-lifecycle"),
@@ -686,6 +690,34 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 	}
 	if err != store.ErrNotFound {
 		return nil, fmt.Errorf("failed to load signing key %s from store: %w", keyName, err)
+	}
+
+	// Migration fallback: try the legacy "hub" scope ID used before hub-instance-ID namespacing.
+	// This allows servers upgrading from the old scheme to find their existing signing keys.
+	if hubID != "hub" {
+		val, err = s.store.GetSecretValue(ctx, keyName, store.ScopeHub, "hub")
+		if err == nil {
+			slog.Info("Loaded signing key from legacy 'hub' scope ID, will re-save with new hub ID", "key", keyName)
+			key, decErr := base64.StdEncoding.DecodeString(val)
+			if decErr != nil {
+				return nil, fmt.Errorf("failed to decode legacy signing key %s: %w", keyName, decErr)
+			}
+			// Re-save under the new hub ID so future lookups find it directly
+			sec := &store.Secret{
+				ID:             fmt.Sprintf("hub-%s", keyName),
+				Key:            keyName,
+				EncryptedValue: val,
+				Scope:          store.ScopeHub,
+				ScopeID:        hubID,
+				Description:    fmt.Sprintf("Hub signing key for %s", keyName),
+			}
+			if _, upsertErr := s.store.UpsertSecret(ctx, sec); upsertErr != nil {
+				slog.Warn("Failed to migrate signing key to new hub ID", "key", keyName, "error", upsertErr)
+			} else {
+				slog.Info("Migrated signing key to new hub ID scope", "key", keyName, "hubID", hubID)
+			}
+			return key, nil
+		}
 	}
 
 	// Not found anywhere, generate a new one
