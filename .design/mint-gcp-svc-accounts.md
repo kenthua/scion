@@ -249,7 +249,7 @@ Wrap `gcloud iam service-accounts create` behind a `scion` CLI command that also
 - [x] Unit tests for admin client, handler, and store changes
 - [ ] Integration test with IAM API (requires test project)
 
-### Phase 2: Limits & UI
-- [ ] Per-grove and global mint caps (configurable)
-- [ ] Web UI: mint button, managed badge
-- [ ] Quota visibility on admin dashboard
+### Phase 2: Limits & UI ✅
+- [x] Per-grove and global mint caps (configurable)
+- [x] Web UI: mint button, managed badge
+- [x] Quota visibility on admin dashboard

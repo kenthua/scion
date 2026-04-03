@@ -165,10 +165,19 @@ type GCPServiceAccountWithCapabilities struct {
 	Cap *Capabilities `json:"_capabilities,omitempty"`
 }
 
+// GCPMintQuotaInfo provides quota information for minted service accounts.
+type GCPMintQuotaInfo struct {
+	GroveMinted  int `json:"grove_minted"`
+	GroveCap     int `json:"grove_cap"` // 0 = unlimited
+	GlobalMinted int `json:"global_minted"`
+	GlobalCap    int `json:"global_cap"` // 0 = unlimited
+}
+
 // ListGCPServiceAccountsResponse is the response for listing GCP service accounts.
 type ListGCPServiceAccountsResponse struct {
 	Items        []GCPServiceAccountWithCapabilities `json:"items"`
 	Capabilities *Capabilities                       `json:"_capabilities,omitempty"`
+	MintQuota    *GCPMintQuotaInfo                   `json:"mint_quota,omitempty"`
 }
 
 func (s *Server) listGCPServiceAccounts(w http.ResponseWriter, r *http.Request, groveID string) {
@@ -208,9 +217,30 @@ func (s *Server) listGCPServiceAccounts(w http.ResponseWriter, r *http.Request, 
 		scopeCap = s.authzService.ComputeScopeCapabilities(ctx, identity, "grove", groveID, "gcp_service_account")
 	}
 
+	// Include mint quota info when minting is configured
+	var mintQuota *GCPMintQuotaInfo
+	if s.gcpIAMAdmin != nil && s.config.GCPProjectID != "" {
+		managed := true
+		groveCount, _ := s.store.CountGCPServiceAccounts(ctx, store.GCPServiceAccountFilter{
+			Scope:   store.ScopeGrove,
+			ScopeID: groveID,
+			Managed: &managed,
+		})
+		globalCount, _ := s.store.CountGCPServiceAccounts(ctx, store.GCPServiceAccountFilter{
+			Managed: &managed,
+		})
+		mintQuota = &GCPMintQuotaInfo{
+			GroveMinted:  groveCount,
+			GroveCap:     s.config.GCPMintCapPerGrove,
+			GlobalMinted: globalCount,
+			GlobalCap:    s.config.GCPMintCapGlobal,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, ListGCPServiceAccountsResponse{
 		Items:        items,
 		Capabilities: scopeCap,
+		MintQuota:    mintQuota,
 	})
 }
 
@@ -392,6 +422,39 @@ func (s *Server) mintGCPServiceAccount(w http.ResponseWriter, r *http.Request, g
 		return
 	}
 
+	// Enforce per-grove mint cap
+	managed := true
+	groveCount, err := s.store.CountGCPServiceAccounts(r.Context(), store.GCPServiceAccountFilter{
+		Scope:   store.ScopeGrove,
+		ScopeID: groveID,
+		Managed: &managed,
+	})
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+	if s.config.GCPMintCapPerGrove > 0 && groveCount >= s.config.GCPMintCapPerGrove {
+		writeError(w, http.StatusConflict, ErrCodeConflict,
+			fmt.Sprintf("per-grove mint limit reached (%d/%d)", groveCount, s.config.GCPMintCapPerGrove), nil)
+		return
+	}
+
+	// Enforce global mint cap
+	if s.config.GCPMintCapGlobal > 0 {
+		globalCount, err := s.store.CountGCPServiceAccounts(r.Context(), store.GCPServiceAccountFilter{
+			Managed: &managed,
+		})
+		if err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+		if globalCount >= s.config.GCPMintCapGlobal {
+			writeError(w, http.StatusConflict, ErrCodeConflict,
+				fmt.Sprintf("global mint limit reached (%d/%d)", globalCount, s.config.GCPMintCapGlobal), nil)
+			return
+		}
+	}
+
 	// Generate or validate the account ID
 	var accountID string
 	if req.AccountID != "" {
@@ -496,6 +559,84 @@ func (s *Server) mintGCPServiceAccount(w http.ResponseWriter, r *http.Request, g
 		"account_id", accountID, "project", projectID, "user", user.ID())
 
 	writeJSON(w, http.StatusCreated, sa)
+}
+
+// GCPQuotaGroveInfo holds per-grove mint quota info for the admin endpoint.
+type GCPQuotaGroveInfo struct {
+	GroveID   string `json:"grove_id"`
+	GroveName string `json:"grove_name"`
+	Minted    int    `json:"minted"`
+}
+
+// GCPQuotaResponse is the response for GET /api/v1/admin/gcp-quota.
+type GCPQuotaResponse struct {
+	MintingConfigured bool                `json:"minting_configured"`
+	GCPProjectID      string              `json:"gcp_project_id,omitempty"`
+	GlobalMinted      int                 `json:"global_minted"`
+	GlobalCap         int                 `json:"global_cap"`
+	PerGroveCap       int                 `json:"per_grove_cap"`
+	Groves            []GCPQuotaGroveInfo `json:"groves,omitempty"`
+}
+
+// handleAdminGCPQuota handles GET /api/v1/admin/gcp-quota.
+func (s *Server) handleAdminGCPQuota(w http.ResponseWriter, r *http.Request) {
+	user := GetUserIdentityFromContext(r.Context())
+	if user == nil || user.Role() != "admin" {
+		Forbidden(w)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		MethodNotAllowed(w)
+		return
+	}
+
+	resp := GCPQuotaResponse{
+		MintingConfigured: s.gcpIAMAdmin != nil && s.config.GCPProjectID != "",
+		GCPProjectID:      s.config.GCPProjectID,
+		GlobalCap:         s.config.GCPMintCapGlobal,
+		PerGroveCap:       s.config.GCPMintCapPerGrove,
+	}
+
+	if resp.MintingConfigured {
+		managed := true
+		globalCount, err := s.store.CountGCPServiceAccounts(r.Context(), store.GCPServiceAccountFilter{
+			Managed: &managed,
+		})
+		if err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+		resp.GlobalMinted = globalCount
+
+		// Get per-grove breakdown
+		allMinted, err := s.store.ListGCPServiceAccounts(r.Context(), store.GCPServiceAccountFilter{
+			Managed: &managed,
+		})
+		if err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+
+		groveCounts := map[string]int{}
+		for _, sa := range allMinted {
+			groveCounts[sa.ScopeID]++
+		}
+
+		for groveID, count := range groveCounts {
+			name := groveID
+			if g, err := s.store.GetGrove(r.Context(), groveID); err == nil {
+				name = g.Name
+			}
+			resp.Groves = append(resp.Groves, GCPQuotaGroveInfo{
+				GroveID:   groveID,
+				GroveName: name,
+				Minted:    count,
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleAgentGCPToken handles POST /api/v1/agent/gcp-token.

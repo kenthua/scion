@@ -1067,7 +1067,7 @@ CREATE INDEX IF NOT EXISTS idx_grove_sync_state_grove ON grove_sync_state(grove_
 `
 
 // migrationV43 fixes pre-existing signing key secrets that were stored with
-// the default secret_type ('environment' or '') instead of 'internal'. Without
+// the default secret_type ('environment' or ”) instead of 'internal'. Without
 // this, stale rows created before the fix would still be resolved and injected
 // into agent containers.
 const migrationV43 = `

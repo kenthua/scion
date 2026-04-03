@@ -161,3 +161,29 @@ func (s *SQLiteStore) ListGCPServiceAccounts(ctx context.Context, filter store.G
 
 	return results, rows.Err()
 }
+
+func (s *SQLiteStore) CountGCPServiceAccounts(ctx context.Context, filter store.GCPServiceAccountFilter) (int, error) {
+	query := `SELECT COUNT(*) FROM gcp_service_accounts WHERE 1=1`
+	var args []interface{}
+
+	if filter.Scope != "" {
+		query += ` AND scope = ?`
+		args = append(args, filter.Scope)
+	}
+	if filter.ScopeID != "" {
+		query += ` AND scope_id = ?`
+		args = append(args, filter.ScopeID)
+	}
+	if filter.Email != "" {
+		query += ` AND email = ?`
+		args = append(args, filter.Email)
+	}
+	if filter.Managed != nil {
+		query += ` AND managed = ?`
+		args = append(args, *filter.Managed)
+	}
+
+	var count int
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	return count, err
+}

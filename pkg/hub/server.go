@@ -128,6 +128,12 @@ type ServerConfig struct {
 	// GCPProjectID is the GCP project ID used for minting service accounts.
 	// If empty, auto-detected from the metadata server when running on GCE/Cloud Run.
 	GCPProjectID string
+	// GCPMintCapPerGrove is the maximum number of minted service accounts allowed per grove.
+	// Zero means unlimited (default).
+	GCPMintCapPerGrove int
+	// GCPMintCapGlobal is the maximum total number of minted service accounts across all groves.
+	// Zero means unlimited (default).
+	GCPMintCapGlobal int
 }
 
 // MaintenanceConfig holds configuration for routine maintenance operation executors.
@@ -1890,6 +1896,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/admin/maintenance/migrations/", s.handleAdminMaintenanceMigrations)
 	s.mux.HandleFunc("/api/v1/admin/scheduler", s.handleAdminScheduler)
 	s.mux.HandleFunc("/api/v1/admin/server-config", s.handleAdminServerConfig)
+	s.mux.HandleFunc("/api/v1/admin/gcp-quota", s.handleAdminGCPQuota)
 
 	// Notification endpoints (user-facing)
 	s.mux.HandleFunc("/api/v1/notifications", s.handleNotifications)

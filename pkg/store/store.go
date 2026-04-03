@@ -907,6 +907,9 @@ type GCPServiceAccountStore interface {
 
 	// ListGCPServiceAccounts returns GCP service accounts matching the filter.
 	ListGCPServiceAccounts(ctx context.Context, filter GCPServiceAccountFilter) ([]GCPServiceAccount, error)
+
+	// CountGCPServiceAccounts returns the number of GCP service accounts matching the filter.
+	CountGCPServiceAccounts(ctx context.Context, filter GCPServiceAccountFilter) (int, error)
 }
 
 // GCPServiceAccountFilter defines criteria for filtering GCP service accounts.

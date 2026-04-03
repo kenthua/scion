@@ -305,3 +305,148 @@ func TestMintGCPServiceAccount_NoAuth(t *testing.T) {
 	assert.True(t, rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden,
 		"expected 401 or 403, got %d", rec.Code)
 }
+
+func TestMintGCPServiceAccount_PerGroveCap(t *testing.T) {
+	srv, _, _ := testServerWithMinting(t)
+	srv.config.GCPMintCapPerGrove = 2
+	groveID := createTestGroveForSA(t, srv, nil)
+
+	// Mint first two — should succeed
+	for i := 0; i < 2; i++ {
+		rec := doRequest(t, srv, http.MethodPost,
+			fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID),
+			map[string]string{})
+		require.Equal(t, http.StatusCreated, rec.Code, "mint %d: %s", i+1, rec.Body.String())
+	}
+
+	// Third mint should be rejected
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID),
+		map[string]string{})
+	require.Equal(t, http.StatusConflict, rec.Code, "expected cap enforcement: %s", rec.Body.String())
+
+	var errResp ErrorResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
+	assert.Contains(t, errResp.Error.Message, "per-grove mint limit")
+}
+
+func TestMintGCPServiceAccount_GlobalCap(t *testing.T) {
+	srv, _, _ := testServerWithMinting(t)
+	srv.config.GCPMintCapGlobal = 3
+
+	// Create two groves and mint in each
+	groveID1 := createTestGroveForSA(t, srv, nil)
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves", map[string]string{
+		"name": "test-grove-sa-2",
+	})
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var grove2 struct{ ID string }
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&grove2))
+	groveID2 := grove2.ID
+
+	// Mint 2 in grove 1, 1 in grove 2 (total 3)
+	for i := 0; i < 2; i++ {
+		rec := doRequest(t, srv, http.MethodPost,
+			fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID1),
+			map[string]string{})
+		require.Equal(t, http.StatusCreated, rec.Code)
+	}
+	rec = doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID2),
+		map[string]string{})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// Fourth mint (in either grove) should be rejected
+	rec = doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID2),
+		map[string]string{})
+	require.Equal(t, http.StatusConflict, rec.Code)
+
+	var errResp ErrorResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
+	assert.Contains(t, errResp.Error.Message, "global mint limit")
+}
+
+func TestListGCPServiceAccounts_IncludesMintQuota(t *testing.T) {
+	srv, _, _ := testServerWithMinting(t)
+	srv.config.GCPMintCapPerGrove = 5
+	srv.config.GCPMintCapGlobal = 10
+	groveID := createTestGroveForSA(t, srv, nil)
+
+	// Mint one SA
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID),
+		map[string]string{})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// List should include quota info
+	rec = doRequest(t, srv, http.MethodGet,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts", groveID), nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Items     []json.RawMessage `json:"items"`
+		MintQuota *struct {
+			GroveMinted  int `json:"grove_minted"`
+			GroveCap     int `json:"grove_cap"`
+			GlobalMinted int `json:"global_minted"`
+			GlobalCap    int `json:"global_cap"`
+		} `json:"mint_quota"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	require.NotNil(t, resp.MintQuota, "mint_quota should be present")
+	assert.Equal(t, 1, resp.MintQuota.GroveMinted)
+	assert.Equal(t, 5, resp.MintQuota.GroveCap)
+	assert.Equal(t, 1, resp.MintQuota.GlobalMinted)
+	assert.Equal(t, 10, resp.MintQuota.GlobalCap)
+}
+
+func TestMintGCPServiceAccount_ManagedFlagSet(t *testing.T) {
+	srv, _, _ := testServerWithMinting(t)
+	groveID := createTestGroveForSA(t, srv, nil)
+
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID),
+		map[string]string{})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var sa struct {
+		Managed   bool   `json:"managed"`
+		ManagedBy string `json:"managed_by"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&sa))
+	assert.True(t, sa.Managed)
+}
+
+func TestMintGCPServiceAccount_PerGroveCap_DifferentGroves(t *testing.T) {
+	srv, _, _ := testServerWithMinting(t)
+	srv.config.GCPMintCapPerGrove = 1
+
+	groveID1 := createTestGroveForSA(t, srv, nil)
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/groves", map[string]string{
+		"name": "test-grove-sa-3",
+	})
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var grove2 struct{ ID string }
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&grove2))
+
+	// Mint in grove 1 — should succeed
+	rec = doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID1),
+		map[string]string{})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// Mint in grove 2 — should also succeed (different grove)
+	rec = doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", grove2.ID),
+		map[string]string{})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	// Second mint in grove 1 — should be rejected
+	rec = doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/gcp-service-accounts/mint", groveID1),
+		map[string]string{})
+	require.Equal(t, http.StatusConflict, rec.Code)
+}

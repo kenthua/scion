@@ -693,7 +693,16 @@ export interface GCPServiceAccount {
   verificationError?: string;
   createdBy: string;
   createdAt: string;
+  managed?: boolean;
+  managedBy?: string;
   _capabilities?: Capabilities;
+}
+
+export interface GCPMintQuotaInfo {
+  grove_minted: number;
+  grove_cap: number;
+  global_minted: number;
+  global_cap: number;
 }
 
 export interface GCPIdentityConfig {
