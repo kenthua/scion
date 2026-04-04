@@ -382,12 +382,13 @@ The Hub includes an automated monitoring system to detect "zombie" or stalled ag
 ### Logs Not Appearing in GCP
 
 1.  **Verify Endpoints**: Ensure `SCION_OTEL_ENDPOINT` is set to `monitoring.googleapis.com:443`.
-2.  **Check Permissions**: Verify the Workload Identity or Service Account has `roles/logging.logWriter`.
-3.  **Inspect Agent Init**: View the agent container logs (stderr) to see if `sciontool` reported a telemetry startup failure:
+2.  **Check Credentials**: Outside of GKE/Cloud Run (where ADC is automatic), agents need a GCP service account key file. Verify the `scion-telemetry-gcp-credentials` secret is registered with target `~/.scion/telemetry-gcp-credentials.json`. Inside the agent, check `echo $SCION_OTEL_GCP_CREDENTIALS` — it should point to the file. See [GCP Credentials for Agent Containers](/scion/hub-admin/metrics/#4-gcp-credentials-for-agent-containers-non-adc-environments) for setup.
+3.  **Check Permissions**: Verify the Workload Identity or Service Account has `roles/logging.logWriter`.
+4.  **Inspect Agent Init**: View the agent container logs (stderr) to see if `sciontool` reported a telemetry startup failure:
     ```
     [sciontool] ERROR: Failed to start telemetry: connection refused
     ```
-4.  **Network Policy**: If running in Kubernetes, ensure Egress is allowed to GCP APIs.
+5.  **Network Policy**: If running in Kubernetes, ensure Egress is allowed to GCP APIs.
 
 ### Missing Trace Correlation
 

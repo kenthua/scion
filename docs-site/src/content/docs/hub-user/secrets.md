@@ -97,6 +97,25 @@ You can use the `@` prefix to read a secret's value from a local file. This is p
 scion hub secret set --type file --target ~/.ssh/id_rsa SSH_KEY @~/.ssh/id_rsa
 ```
 
+### Well-Known Secrets
+
+Scion recognizes certain secret names and uses them for built-in platform features. Using the correct name causes the broker to perform additional setup automatically.
+
+| Secret Name | Type | Target Path | Effect |
+|-------------|------|-------------|--------|
+| `scion-telemetry-gcp-credentials` | `file` | `~/.scion/telemetry-gcp-credentials.json` | Sets `SCION_OTEL_GCP_CREDENTIALS`, auto-enables GCP-native telemetry export, and reads `project_id` from the file if `SCION_GCP_PROJECT_ID` is not set. |
+
+**Example — provisioning GCP telemetry credentials:**
+
+```bash
+scion hub secret set \
+  --type file \
+  --target ~/.scion/telemetry-gcp-credentials.json \
+  scion-telemetry-gcp-credentials @/path/to/sa-key.json
+```
+
+Once set, every agent that starts will have the credential file mounted at `~/.scion/telemetry-gcp-credentials.json` and GCP-native telemetry will be enabled automatically — no additional environment variable configuration required. See [Metrics & OpenTelemetry](/scion/hub-admin/metrics/#4-gcp-credentials-for-agent-containers-non-adc-environments) for the full setup guide.
+
 ---
 
 ## Administrator Configuration (Hub)

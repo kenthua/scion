@@ -99,6 +99,8 @@ Environment variables override any settings file value and are the most convenie
 | `SCION_TELEMETRY_HUB_ENABLED` | `telemetry.hub.enabled` | `true` | Enable Hub reporting |
 | `SCION_TELEMETRY_DEBUG` | `telemetry.local.enabled` | `false` | Enable local debug output |
 | `SCION_GCP_PROJECT_ID` | — | (auto) | GCP project ID for Google Cloud backends |
+| `SCION_OTEL_GCP_CREDENTIALS` | — | (auto) | Path to a GCP service account key JSON file; set automatically by the broker from the `scion-telemetry-gcp-credentials` secret |
+| `SCION_TELEMETRY_CLOUD_PROVIDER` | — | (auto) | Cloud backend: `gcp` for GCP-native export; auto-detected when credentials file is present |
 
 ### Local Receiver Settings (For Agents)
 
@@ -141,6 +143,36 @@ Ensure the environment where the agent container runs (GKE Pod, Cloud Run, etc.)
 - `roles/logging.logWriter`
 - `roles/cloudtrace.agent`
 - `roles/monitoring.metricWriter`
+
+### 4. GCP Credentials for Agent Containers (Non-ADC Environments)
+
+When agents run outside of GKE or Cloud Run — where [Application Default Credentials (ADC)](https://cloud.google.com/docs/authentication/application-default-credentials) are not automatically available — you must supply a GCP service account key file. Scion uses a **well-known secret** to provision this credential into every agent container automatically.
+
+| Property | Value |
+|----------|-------|
+| **Secret name** | `scion-telemetry-gcp-credentials` |
+| **Secret type** | `file` |
+| **Target path** | `~/.scion/telemetry-gcp-credentials.json` |
+| **Env var set by broker** | `SCION_OTEL_GCP_CREDENTIALS` |
+
+Register the secret once via the Hub:
+
+```bash
+scion hub secret set \
+  --type file \
+  --target ~/.scion/telemetry-gcp-credentials.json \
+  scion-telemetry-gcp-credentials @/path/to/sa-key.json
+```
+
+When an agent starts, the broker:
+1. Writes the credential file to `~/.scion/telemetry-gcp-credentials.json` in the agent's home directory.
+2. Sets `SCION_OTEL_GCP_CREDENTIALS` to that path.
+3. Auto-sets `SCION_TELEMETRY_CLOUD_PROVIDER=gcp` if not already configured.
+4. Reads `project_id` from the credentials JSON to populate `SCION_GCP_PROJECT_ID` if not set explicitly.
+
+:::note[Fallback probe]
+`sciontool` also probes `~/.scion/telemetry-gcp-credentials.json` at startup even when `SCION_OTEL_GCP_CREDENTIALS` is not set — for example, when the file is placed via a volume mount or template provisioning. If the file exists, all of the above auto-detection applies.
+:::
 
 ## Native Metrics Pipeline
 
