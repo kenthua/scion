@@ -16,6 +16,9 @@
 # extras/scion-chat-app/install.sh — Install the chat app alongside a
 # provisioned Scion Hub (via scripts/starter-hub/).
 #
+# Runs as the scion user without requiring sudo. System-level changes
+# (Caddyfile) are printed as manual instructions for an admin to apply.
+#
 # Idempotent: safe to re-run after hub updates that overwrite the Caddyfile
 # or settings.yaml.
 #
@@ -29,15 +32,15 @@ set -euo pipefail
 # Paths
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCION_HOME="/home/scion"
+SCION_HOME="${HOME}"
 SCION_DIR="${SCION_HOME}/.scion"
-INSTALL_BIN="/usr/local/bin"
+INSTALL_BIN="${SCION_HOME}/.local/bin"
 CADDYFILE="/etc/caddy/Caddyfile"
 SETTINGS_FILE="${SCION_DIR}/settings.yaml"
 HUB_ENV="${SCION_DIR}/hub.env"
 CHAT_ENV="${SCION_DIR}/chat-app.env"
 CONFIG_FILE="${SCION_DIR}/scion-chat-app.yaml"
-SYSTEMD_UNIT="/etc/systemd/system/scion-chat-app.service"
+SYSTEMD_USER_DIR="${SCION_HOME}/.config/systemd/user"
 
 LISTEN_PORT="${CHAT_APP_LISTEN_PORT:-8443}"
 
@@ -88,14 +91,15 @@ step "Installing scion-chat-app"
 BINARY="${SCRIPT_DIR}/scion-chat-app"
 need_file "${BINARY}" "Run 'make build' first."
 
+mkdir -p "${INSTALL_BIN}"
 substep "Installing binary to ${INSTALL_BIN}"
-sudo install -m 755 "${BINARY}" "${INSTALL_BIN}/scion-chat-app"
+install -m 755 "${BINARY}" "${INSTALL_BIN}/scion-chat-app"
 
 # ---------------------------------------------------------------------------
 # 2. Config file
 # ---------------------------------------------------------------------------
 substep "Writing config to ${CONFIG_FILE}"
-cat > /tmp/scion-chat-app.yaml <<EOF
+cat > "${CONFIG_FILE}" <<EOF
 hub:
   endpoint: "${SCION_HUB_ENDPOINT}"
   user: "${CHAT_APP_HUB_USER}"
@@ -130,22 +134,19 @@ logging:
   level: "info"
   format: "json"
 EOF
-sudo install -m 600 -o scion -g scion /tmp/scion-chat-app.yaml "${CONFIG_FILE}"
-rm -f /tmp/scion-chat-app.yaml
+chmod 600 "${CONFIG_FILE}"
 
 # ---------------------------------------------------------------------------
-# 3. Systemd unit
+# 3. Systemd user unit
 # ---------------------------------------------------------------------------
-substep "Installing systemd unit"
-cat > /tmp/scion-chat-app.service <<EOF
+substep "Installing systemd user unit"
+mkdir -p "${SYSTEMD_USER_DIR}"
+cat > "${SYSTEMD_USER_DIR}/scion-chat-app.service" <<EOF
 [Unit]
 Description=Scion Chat App
-After=network.target scion-hub.service
-Wants=scion-hub.service
+After=network.target
 
 [Service]
-User=scion
-Group=scion
 Environment="HOME=${SCION_HOME}"
 StandardOutput=journal
 StandardError=journal
@@ -154,47 +155,56 @@ Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOF
-sudo install -m 644 /tmp/scion-chat-app.service "${SYSTEMD_UNIT}"
-rm -f /tmp/scion-chat-app.service
-sudo systemctl daemon-reload
-sudo systemctl enable scion-chat-app
+
+systemctl --user daemon-reload
+systemctl --user enable scion-chat-app
+
+# Enable lingering so the user service survives after logout.
+if ! loginctl show-user "$(whoami)" --property=Linger 2>/dev/null | grep -q 'Linger=yes'; then
+    substep "Enabling loginctl linger (may require sudo if not already enabled)"
+    loginctl enable-linger "$(whoami)" 2>/dev/null || \
+        echo "   NOTICE: Could not enable linger. Ask an admin to run: sudo loginctl enable-linger $(whoami)"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Patch Caddyfile
 # ---------------------------------------------------------------------------
-step "Patching Caddyfile"
+step "Checking Caddyfile"
 
 if [[ ! -f "${CADDYFILE}" ]]; then
     substep "No Caddyfile found at ${CADDYFILE}, skipping"
+elif ! head -1 "${CADDYFILE}" >/dev/null 2>&1; then
+    substep "Cannot read ${CADDYFILE}, skipping"
 else
-    # Extract the domain line and tls directive from the existing Caddyfile.
-    # The starter-hub generates a simple single-site block; we rewrite it
-    # to add path-based routing for the chat app.
-    DOMAIN="$(head -1 "${CADDYFILE}" | sed 's/ *{$//')"
-    TLS_LINE="$(grep '^\s*tls ' "${CADDYFILE}" || true)"
-
-    cat > /tmp/Caddyfile <<EOF
-${DOMAIN} {
-    handle /chat/* {
-        reverse_proxy localhost:${LISTEN_PORT}
-    }
-    handle {
-        reverse_proxy localhost:8080
-    }
-    ${TLS_LINE}
-}
-EOF
-
-    if ! diff -q /tmp/Caddyfile "${CADDYFILE}" >/dev/null 2>&1; then
-        sudo install -m 644 -o caddy -g caddy /tmp/Caddyfile "${CADDYFILE}"
-        sudo systemctl reload caddy
-        substep "Caddyfile updated, Caddy reloaded"
+    # Check if the chat route is already present.
+    if grep -q '/chat/\*' "${CADDYFILE}" 2>/dev/null; then
+        substep "Caddyfile already has chat route"
     else
-        substep "Caddyfile already up to date"
+        DOMAIN="$(head -1 "${CADDYFILE}" | sed 's/ *{$//')"
+        TLS_LINE="$(grep '^\s*tls ' "${CADDYFILE}" || true)"
+
+        echo ""
+        echo "   ┌─────────────────────────────────────────────────────────────┐"
+        echo "   │ ACTION REQUIRED: Update the Caddyfile to route /chat/*     │"
+        echo "   │ An admin with sudo access needs to run:                    │"
+        echo "   └─────────────────────────────────────────────────────────────┘"
+        echo ""
+        echo "   sudo tee ${CADDYFILE} <<'CADDY_EOF'"
+        echo "${DOMAIN} {"
+        echo "    handle /chat/* {"
+        echo "        reverse_proxy localhost:${LISTEN_PORT}"
+        echo "    }"
+        echo "    handle {"
+        echo "        reverse_proxy localhost:8080"
+        echo "    }"
+        echo "    ${TLS_LINE}"
+        echo "}"
+        echo "CADDY_EOF"
+        echo "   sudo systemctl reload caddy"
+        echo ""
     fi
-    rm -f /tmp/Caddyfile
 fi
 
 # ---------------------------------------------------------------------------
@@ -210,16 +220,13 @@ else
     # The starter-hub settings.yaml doesn't include a plugins section.
     # If a future version adds one, we handle both cases.
     if grep -q '^plugins:' "${SETTINGS_FILE}"; then
-        # plugins key exists — append under it.
-        # Insert after the 'plugins:' line. If 'broker:' also exists,
-        # insert the googlechat entry under broker instead.
         if grep -q '^\s*broker:' "${SETTINGS_FILE}"; then
-            sudo sed -i '/^\s*broker:/a\    googlechat:\n      self_managed: true\n      address: "localhost:9090"' "${SETTINGS_FILE}"
+            sed -i '/^\s*broker:/a\    googlechat:\n      self_managed: true\n      address: "localhost:9090"' "${SETTINGS_FILE}"
         else
-            sudo sed -i '/^plugins:/a\  broker:\n    googlechat:\n      self_managed: true\n      address: "localhost:9090"' "${SETTINGS_FILE}"
+            sed -i '/^plugins:/a\  broker:\n    googlechat:\n      self_managed: true\n      address: "localhost:9090"' "${SETTINGS_FILE}"
         fi
     else
-        printf '\nplugins:\n  broker:\n    googlechat:\n      self_managed: true\n      address: "localhost:9090"\n' | sudo tee -a "${SETTINGS_FILE}" >/dev/null
+        printf '\nplugins:\n  broker:\n    googlechat:\n      self_managed: true\n      address: "localhost:9090"\n' >> "${SETTINGS_FILE}"
     fi
     substep "settings.yaml updated with googlechat plugin config"
 fi
@@ -228,5 +235,5 @@ fi
 # 6. Start / restart
 # ---------------------------------------------------------------------------
 step "Restarting scion-chat-app"
-sudo systemctl restart scion-chat-app
-substep "Done — check status with: journalctl -u scion-chat-app -f"
+systemctl --user restart scion-chat-app
+substep "Done — check status with: journalctl --user -u scion-chat-app -f"
