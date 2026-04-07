@@ -306,25 +306,23 @@ HUB_SETTINGS_CHANGED=0
 if [[ ! -f "${SETTINGS_FILE}" ]]; then
     substep "No settings.yaml found at ${SETTINGS_FILE}, skipping"
 else
-    # 5a. Add the googlechat plugin entry under plugins.broker.
+    # 5a. Add the googlechat plugin entry under server.plugins.broker.
+    # The plugins key must be nested under "server:" in settings.yaml,
+    # NOT at the root level, to match the V1ServerConfig schema.
     if grep -q 'googlechat' "${SETTINGS_FILE}"; then
         substep "settings.yaml already has googlechat plugin config"
     else
-        # The starter-hub settings.yaml doesn't include a plugins section.
-        # If a future version adds one, we handle both cases.
+        # Remove any stale root-level plugins: block (from earlier install
+        # versions that incorrectly placed it at the root).
         if grep -q '^plugins:' "${SETTINGS_FILE}"; then
-            # plugins key exists — append under it.
-            # Insert after the 'plugins:' line. If 'broker:' also exists,
-            # insert the googlechat entry under broker instead.
-            if grep -q '^\s*broker:' "${SETTINGS_FILE}"; then
-                sudo sed -i '/^\s*broker:/a\    googlechat:\n      self_managed: true\n      address: "localhost:9090"' "${SETTINGS_FILE}"
-            else
-                sudo sed -i '/^plugins:/a\  broker:\n    googlechat:\n      self_managed: true\n      address: "localhost:9090"' "${SETTINGS_FILE}"
-            fi
-        else
-            printf '\nplugins:\n  broker:\n    googlechat:\n      self_managed: true\n      address: "localhost:9090"\n' | sudo tee -a "${SETTINGS_FILE}" >/dev/null
+            substep "removing stale root-level plugins: block"
+            sudo sed -i '/^plugins:/,/^[^ ]/{ /^[^ ]/!d; /^plugins:/d; }' "${SETTINGS_FILE}"
         fi
-        substep "settings.yaml updated with googlechat plugin config"
+
+        # Insert under server: (plugins must be a child of server in the schema).
+        sudo sed -i '/^\s*server:/a\    plugins:\n        broker:\n            googlechat:\n                self_managed: true\n                address: "localhost:9090"' "${SETTINGS_FILE}"
+
+        substep "settings.yaml updated with googlechat plugin config under server"
         HUB_SETTINGS_CHANGED=1
     fi
 
