@@ -158,7 +158,7 @@ func (n *NotificationRelay) handleUserMessage(ctx context.Context, groveID strin
 
 		card := Card{
 			Header: CardHeader{
-				Title:    fmt.Sprintf("Message from %s", agentSlug),
+				Title:    fmt.Sprintf("\U0001F916 %s", agentSlug),
 				Subtitle: fmt.Sprintf("Grove: %s", link.GroveSlug),
 			},
 			Sections: []CardSection{
@@ -168,23 +168,17 @@ func (n *NotificationRelay) handleUserMessage(ctx context.Context, groveID strin
 					},
 				},
 			},
-			Actions: []CardAction{
-				{Label: "Reply", ActionID: fmt.Sprintf("agent.respond.%s", agentSlug)},
-				{Label: "View Logs", ActionID: fmt.Sprintf("agent.logs.%s", agentSlug)},
-			},
 		}
 
-		// Build @mentions: always include the direct recipient, plus any subscribers
+		// @mentions go in the text body (not inside card widgets) so the
+		// Chat API renders them as interactive user pills.
 		mentions := n.buildMentions(mapping.PlatformUserID, agentSlug, link)
-		if mentions != "" {
-			card.Sections = append(card.Sections, CardSection{
-				Widgets: []Widget{
-					{Type: WidgetText, Content: mentions},
-				},
-			})
-		}
 
-		if _, err := n.messenger.SendCard(ctx, link.SpaceID, card); err != nil {
+		if _, err := n.messenger.SendMessage(ctx, SendMessageRequest{
+			SpaceID: link.SpaceID,
+			Text:    mentions,
+			Card:    &card,
+		}); err != nil {
 			n.log.Error("failed to relay user message",
 				"space_id", link.SpaceID,
 				"recipient", msg.RecipientID,

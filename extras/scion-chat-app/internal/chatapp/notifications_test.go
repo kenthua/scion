@@ -56,23 +56,19 @@ func TestHandleBrokerMessage_IgnoredTopics(t *testing.T) {
 	}
 }
 
-// fakeMessenger records SendCard calls for test assertions.
+// fakeMessenger records SendMessage and SendCard calls for test assertions.
 type fakeMessenger struct {
-	cards []sentCard
+	messages []SendMessageRequest
 }
 
-type sentCard struct {
-	spaceID string
-	card    Card
-}
-
-func (f *fakeMessenger) SendCard(_ context.Context, spaceID string, card Card) (string, error) {
-	f.cards = append(f.cards, sentCard{spaceID: spaceID, card: card})
+func (f *fakeMessenger) SendMessage(_ context.Context, req SendMessageRequest) (string, error) {
+	f.messages = append(f.messages, req)
 	return "msg-1", nil
 }
 
-func (f *fakeMessenger) SendMessage(context.Context, SendMessageRequest) (string, error) {
-	return "", nil
+func (f *fakeMessenger) SendCard(_ context.Context, spaceID string, card Card) (string, error) {
+	f.messages = append(f.messages, SendMessageRequest{SpaceID: spaceID, Card: &card})
+	return "msg-1", nil
 }
 func (f *fakeMessenger) UpdateMessage(context.Context, string, SendMessageRequest) error { return nil }
 func (f *fakeMessenger) OpenDialog(context.Context, string, Dialog) error                { return nil }
@@ -135,25 +131,29 @@ func TestHandleUserMessage_NoSubscriptionRequired(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(fm.cards) == 0 {
-		t.Fatal("expected at least one card to be sent, got none — direct messages must not require subscriptions")
+	if len(fm.messages) == 0 {
+		t.Fatal("expected at least one message to be sent, got none — direct messages must not require subscriptions")
 	}
 
-	got := fm.cards[0]
-	if got.spaceID != "spaces/AAQAx" {
-		t.Errorf("card sent to wrong space: got %q, want %q", got.spaceID, "spaces/AAQAx")
+	got := fm.messages[0]
+	if got.SpaceID != "spaces/AAQAx" {
+		t.Errorf("message sent to wrong space: got %q, want %q", got.SpaceID, "spaces/AAQAx")
 	}
-	if got.card.Header.Title != "Message from simon" {
-		t.Errorf("unexpected card title: %q", got.card.Header.Title)
+	if got.Card == nil {
+		t.Fatal("expected a card in the message")
+	}
+	wantTitle := "\U0001F916 simon"
+	if got.Card.Header.Title != wantTitle {
+		t.Errorf("card title = %q, want %q", got.Card.Header.Title, wantTitle)
 	}
 
-	// The card should @mention the recipient (no "To:" field)
-	lastSection := got.card.Sections[len(got.card.Sections)-1]
-	if len(lastSection.Widgets) == 0 {
-		t.Fatal("expected a mention widget in the last section")
+	// @mentions should be in the text body, not inside the card
+	if got.Text != "<users/12345>" {
+		t.Errorf("text body = %q, want @mention %q", got.Text, "<users/12345>")
 	}
-	mentionText := lastSection.Widgets[0].Content
-	if mentionText != "<users/12345>" {
-		t.Errorf("expected recipient @mention, got %q", mentionText)
+
+	// Card should have no action buttons
+	if len(got.Card.Actions) != 0 {
+		t.Errorf("expected no card actions, got %d", len(got.Card.Actions))
 	}
 }
