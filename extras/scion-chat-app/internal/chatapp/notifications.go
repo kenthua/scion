@@ -158,8 +158,7 @@ func (n *NotificationRelay) handleUserMessage(ctx context.Context, groveID strin
 
 		card := Card{
 			Header: CardHeader{
-				Title:    fmt.Sprintf("\U0001F916 %s", agentSlug),
-				Subtitle: fmt.Sprintf("Grove: %s", link.GroveSlug),
+				Title: fmt.Sprintf("\U0001F916 %s", agentSlug),
 			},
 			Sections: []CardSection{
 				{
